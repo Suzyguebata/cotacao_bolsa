@@ -1,0 +1,13 @@
+pytest
+pyspark
+delta-spark
+fastapi
+uvicorn[standard]
+kafka-python
+requests
+pandas
+pyarrow
+minio
+duckdb
+python-dotenv
+apscheduler

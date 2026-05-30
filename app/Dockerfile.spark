@@ -1,0 +1,21 @@
+FROM apache/spark:3.5.0-python3
+
+USER root
+
+# Instalar dependências python necessárias
+RUN pip install delta-spark==3.0.0 pyspark==3.5.0 minio
+
+# Criar diretórios necessários e dar permissão total ao usuário spark
+RUN mkdir -p /home/spark/.ivy2/cache && \
+    mkdir -p /app/checkpoints && \
+    chown -R spark:spark /home/spark && \
+    chmod -R 777 /home/spark && \
+    chmod -R 777 /app/checkpoints
+
+WORKDIR /app
+COPY consumer/ /app/consumer/
+
+# Garantir que o Spark use o diretório de cache correto
+ENV IVY_PACKAGE_DIR=/home/spark/.ivy2/jars
+
+USER spark
