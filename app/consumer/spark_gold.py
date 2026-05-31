@@ -42,10 +42,11 @@ df_silver = spark.readStream \
 
 # 2. Transformações da Camada Gold (Agregações de Negócio)
 # Calculamos métricas em janelas de 5 minutos para cada ticker
+# NOTA: Usando ingestion_timestamp para o teste integrado pois event_timestamp da API é estático
 df_gold = df_silver \
-    .withWatermark("event_timestamp", "10 minutes") \
+    .withWatermark("ingestion_timestamp", "1 minute") \
     .groupBy(
-        window(col("event_timestamp"), "5 minutes"),
+        window(col("ingestion_timestamp"), "1 minute"),
         col("ticker")
     ).agg(
         avg("price").alias("avg_price"),
