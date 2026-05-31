@@ -1,8 +1,3 @@
-import pandas as pd
-import duckdb
-from datetime import datetime
-import time
-
 # Este script simula um coletor de métricas que consulta o Trino ou os arquivos Delta
 # Para simplificar o TCC, vamos focar no cálculo via SQL que pode ser feito no Trino
 
