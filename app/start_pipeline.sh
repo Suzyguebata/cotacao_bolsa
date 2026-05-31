@@ -25,22 +25,26 @@ echo "Ambiente virtual ativado."
 echo
 
 # 3. Instalar dependências
-echo "[3/7] Instalando dependências..."
+echo "[3/8] Instalando dependências..."
 pip install -r requirements.txt
 echo
 
-# 4. Iniciar API FastAPI
-echo "[4/7] Iniciando API (Lambda local)..."
+# 4. Executar Testes Unitários no Docker
+echo "[4/8] Executando Testes Unitários (Spark Transformation)..."
+docker exec -u root app-spark-bronze-1 pip install pytest --quiet
+docker exec app-spark-bronze-1 pytest /app/tests/test_spark_logic.py
+if [ $? -ne 0 ]; then
+    echo "[ERRO] Os testes unitários falharam! Verifique a lógica do Spark."
+    exit 1
+fi
+echo "Testes aprovados!"
+echo
+
+# 5. Iniciar API FastAPI
+echo "[5/7] Iniciando API (Lambda local)..."
 ( python -m uvicorn api.lambda_api:app --reload --port 8000 & )
 sleep 2
 echo "API iniciada na porta 8000."
-echo
-
-# 5. Iniciar Consumer Kafka
-echo "[5/7] Iniciando Consumer Kafka..."
-( python consumer/consumer.py & )
-sleep 2
-echo "Consumer iniciado."
 echo
 
 # 6. Iniciar Scheduler
