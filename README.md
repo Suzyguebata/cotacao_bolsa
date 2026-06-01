@@ -47,6 +47,16 @@ docker exec -u root app-spark-bronze-1 pip install pytest
 docker exec app-spark-bronze-1 pytest /app/tests/test_spark_logic.py
 ```
 
+### 2.2 Execução de Testes Integrados (Venv Local)
+Estes testes validam o fluxo completo (API -> Kafka -> Spark -> Delta -> Trino) sem precisar de Java local:
+```bash
+# 1. Garanta que a API está rodando em um terminal:
+uvicorn api.lambda_api:app --port 8000
+
+# 2. Em outro terminal, com o venv ativado:
+pytest tests/test_integration.py
+```
+
 ### 3. Como Evidenciar os Resultados (via Trino)
 Para comprovar que o sistema está funcionando, execute as queries de monitoramento:
 
