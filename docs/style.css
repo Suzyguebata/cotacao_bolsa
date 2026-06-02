@@ -1,0 +1,149 @@
+:root {
+    --primary-lilac: #9D81BA;
+    --secondary-lilac: #B6A2D1;
+    --bg-gray: #F8F9FA;
+    --text-dark: #495057;
+    --white: #FFFFFF;
+    --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    line-height: 1.6;
+    color: var-text-dark;
+    background-color: var(--bg-gray);
+    color: var(--text-dark);
+}
+
+header {
+    background-color: var(--white);
+    padding: 1rem 5%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    position: sticky;
+    top: 0;
+    z-index: 1000;
+    box-shadow: var(--shadow);
+}
+
+.logo-container {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.logo-container img {
+    height: 40px;
+    width: 40px;
+}
+
+.author-name {
+    font-weight: 700;
+    color: var(--primary-lilac);
+    font-size: 1.2rem;
+}
+
+.hero {
+    background: linear-gradient(135deg, var(--primary-lilac) 0%, var(--secondary-lilac) 100%);
+    color: var(--white);
+    padding: 4rem 5%;
+    text-align: center;
+}
+
+.hero h1 {
+    font-size: 2.5rem;
+    margin-bottom: 1rem;
+}
+
+.container {
+    max-width: 1000px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+}
+
+section {
+    background: var(--white);
+    padding: 2rem;
+    border-radius: 12px;
+    margin-bottom: 2rem;
+    box-shadow: var(--shadow);
+}
+
+h2 {
+    color: var(--primary-lilac);
+    margin-bottom: 1.5rem;
+    border-bottom: 2px solid var(--bg-gray);
+    padding-bottom: 0.5rem;
+}
+
+.diagram-container {
+    overflow-x: auto;
+    display: flex;
+    justify-content: center;
+    padding: 1rem 0;
+}
+
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1.5rem;
+}
+
+.card {
+    background: var(--bg-gray);
+    padding: 1.5rem;
+    border-radius: 8px;
+    text-align: center;
+    transition: transform 0.2s;
+    text-decoration: none;
+    color: inherit;
+    border-top: 4px solid var(--primary-lilac);
+}
+
+.card:hover {
+    transform: translateY(-5px);
+}
+
+.card h3 {
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+    color: var(--primary-lilac);
+}
+
+code, pre {
+    background: #2d2d2d;
+    color: #f8f8f2;
+    padding: 1rem;
+    border-radius: 6px;
+    display: block;
+    overflow-x: auto;
+    font-family: 'Fira Code', monospace;
+    font-size: 0.9rem;
+    margin: 1rem 0;
+}
+
+footer {
+    text-align: center;
+    padding: 2rem;
+    color: #888;
+    font-size: 0.9rem;
+}
+
+.warning {
+    background-color: #fff3cd;
+    border-left: 4px solid #ffc107;
+    padding: 1rem;
+    margin: 1rem 0;
+    color: #856404;
+}
+
+@media (max-width: 768px) {
+    .hero h1 { font-size: 1.8rem; }
+}
