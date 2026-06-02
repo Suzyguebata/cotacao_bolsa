@@ -9,8 +9,8 @@
   } ],
   "partitionColumns" : [ ],
   "parameters" : {
-    "trino_query_id" : "20260531_222710_00006_xi58g",
-    "location" : "s3a://datalake/silver/cotacoes",
+    "trino_query_id" : "20260602_010140_00021_vntkp",
+    "location" : "s3a://datalake/gold/media_precos_5min",
     "spark.sql.sources.provider" : "DELTA",
     "numFiles" : "-1",
     "totalSize" : "-1",
@@ -18,8 +18,8 @@
   },
   "storageFormat" : "SEQUENCEFILE",
   "serdeParameters" : {
-    "path" : "s3a://datalake/silver/cotacoes"
+    "path" : "s3a://datalake/gold/media_precos_5min"
   },
-  "externalLocation" : "s3a://datalake/silver/cotacoes",
+  "externalLocation" : "s3a://datalake/gold/media_precos_5min",
   "columnStatistics" : { }
 }

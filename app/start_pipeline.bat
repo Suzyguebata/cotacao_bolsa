@@ -18,14 +18,14 @@ echo Ambiente virtual ativado.
 echo.
 
 REM --- 3. Instalar dependências (se necessário)
-echo [3/8] Instalando dependências...
+echo [3/7] Instalando dependências...
 pip install -r requirements.txt
 echo.
 
 REM --- 4. Executar Testes Unitários no Docker
-echo [4/8] Executando Testes Unitários (Spark Transformation)...
+echo [4/7] Executando Testes Unitários (Spark Transformation)...
 docker exec -u root app-spark-bronze-1 pip install pytest --quiet
-docker exec app-spark-bronze-1 pytest /app/tests/test_spark_logic.py
+docker exec -u root app-spark-bronze-1 pytest /app/tests/test_spark_logic.py
 if %ERRORLEVEL% NEQ 0 (
     echo [ERRO] Os testes unitários falharam! Verifique a lógica do Spark.
     pause

@@ -55,7 +55,7 @@ services:
       - SPARK_WORKER_WEBUI_PORT=8081
       - SPARK_MASTER=spark://spark-master:7077
       - SPARK_WORKER_CORES=3
-      - SPARK_WORKER_MEMORY=3G
+      - SPARK_WORKER_MEMORY=4G
 
   trino:
     image: trinodb/trino:435
@@ -71,9 +71,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.spark
-    command: /opt/spark/bin/spark-submit --master spark://spark-master:7077 --driver-memory 700M --executor-memory 700M --total-executor-cores 1 --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,io.delta:delta-spark_2.12:3.0.0,org.apache.hadoop:hadoop-aws:3.3.4 consumer/spark_consumer.py
+    command: /opt/spark/bin/spark-submit --master spark://spark-master:7077 --driver-memory 1G --executor-memory 1G --total-executor-cores 1 --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,io.delta:delta-spark_2.12:3.0.0,org.apache.hadoop:hadoop-aws:3.3.4 consumer/spark_consumer.py
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+    volumes:
+      - .:/app
     depends_on:
       - kafka
       - minio
@@ -82,7 +84,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.spark
-    command: /opt/spark/bin/spark-submit --master spark://spark-master:7077 --driver-memory 700M --executor-memory 700M --total-executor-cores 1 --packages io.delta:delta-spark_2.12:3.0.0,org.apache.hadoop:hadoop-aws:3.3.4 consumer/spark_silver.py
+    command: /opt/spark/bin/spark-submit --master spark://spark-master:7077 --driver-memory 1G --executor-memory 1G --total-executor-cores 1 --packages io.delta:delta-spark_2.12:3.0.0,org.apache.hadoop:hadoop-aws:3.3.4 consumer/spark_silver.py
+    volumes:
+      - .:/app
     depends_on:
       - spark-bronze
 
@@ -90,7 +94,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.spark
-    command: /opt/spark/bin/spark-submit --master spark://spark-master:7077 --driver-memory 700M --executor-memory 700M --total-executor-cores 1 --packages io.delta:delta-spark_2.12:3.0.0,org.apache.hadoop:hadoop-aws:3.3.4 consumer/spark_gold.py
+    command: /opt/spark/bin/spark-submit --master spark://spark-master:7077 --driver-memory 1G --executor-memory 1G --total-executor-cores 1 --packages io.delta:delta-spark_2.12:3.0.0,org.apache.hadoop:hadoop-aws:3.3.4 consumer/spark_gold.py
+    volumes:
+      - .:/app
     depends_on:
       - spark-silver
 
