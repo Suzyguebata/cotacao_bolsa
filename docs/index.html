@@ -112,11 +112,51 @@ CALL delta.system.register_table(schema_name => 'silver', table_name => 'cotacoe
 CALL delta.system.register_table(schema_name => 'gold', table_name => 'media_precos_5min', table_location => 's3a://datalake/gold/media_precos_5min');
             </pre>
 
-            <h3>Query de Volume</h3>
+            <h3>Query de Volume por Camada</h3>
             <pre>
 SELECT 'Bronze' as camada, count(*) as total FROM delta.bronze.cotacoes
 UNION ALL
-SELECT 'Silver' as camada, count(*) as total FROM delta.silver.cotacoes;
+SELECT 'Silver' as camada, count(*) as total FROM delta.silver.cotacoes
+UNION ALL
+SELECT 'Gold' as camada, count(*) as total FROM delta.gold.media_precos_5min;
+            </pre>
+
+            <h3>Query de Throughput (Vazão)</h3>
+            <pre>
+SELECT 
+    date_trunc('minute', ingestion_timestamp) as minuto_processamento,
+    count(*) as total_registros,
+    round(count(*) / 60.0, 2) as registros_por_segundo
+FROM delta.silver.cotacoes
+GROUP BY 1
+ORDER BY 1 DESC;
+            </pre>
+
+            <h3>Análise de Negócio e Volatilidade</h3>
+            <pre>
+SELECT 
+    ticker,
+    count(*) as num_amostras,
+    round(avg(price), 2) as preco_medio,
+    min(price) as preco_minimo,
+    max(price) as preco_maximo,
+    round(max(price) - min(price), 2) as volatilidade_janela
+FROM delta.silver.cotacoes
+GROUP BY ticker
+ORDER BY num_amostras DESC;
+            </pre>
+
+            <h3>Latência da Camada Gold</h3>
+            <pre>
+SELECT 
+    window_start,
+    window_end,
+    ticker,
+    avg_price,
+    calculation_timestamp,
+    date_diff('second', window_end, calculation_timestamp) as latencia_segundos
+FROM delta.gold.media_precos_5min
+ORDER BY window_end DESC;
             </pre>
         </section>
 
