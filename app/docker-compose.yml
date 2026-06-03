@@ -10,7 +10,8 @@ services:
   kafka:
     image: confluentinc/cp-kafka:7.5.0
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_started
     ports:
       - "9092:9092"
     environment:
@@ -22,14 +23,25 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: INSIDE
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
 
+  kafka-init:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      kafka:
+        condition: service_started
+    command: >
+      bash -c "
+      cub kafka-ready -b kafka:29092 1 60 &&
+      kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic ${KAFKA_TOPIC:-cotacoes} --partitions 1 --replication-factor 1
+      "
+
   minio:
     image: minio/minio:RELEASE.2024-01-11T07-46-16Z
     ports:
       - "9000:9000"
       - "9001:9001"
     environment:
-      MINIO_ROOT_USER: admin
-      MINIO_ROOT_PASSWORD: admin123
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-admin123}
     volumes:
       - minio_data:/data
     command: server /data --console-address ":9001"
@@ -48,7 +60,8 @@ services:
     image: apache/spark:3.5.0-python3
     command: /opt/spark/bin/spark-class org.apache.spark.deploy.worker.Worker spark://spark-master:7077
     depends_on:
-      - spark-master
+      spark-master:
+        condition: service_started
     ports:
       - "8081:8081"
     environment:
@@ -65,7 +78,46 @@ services:
       - ./trino/catalog:/etc/trino/catalog
       - ./trino/metastore:/etc/trino/metastore
     depends_on:
-      - minio
+      minio:
+        condition: service_started
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    command: python -m uvicorn api.lambda_api:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_TOPIC=${KAFKA_TOPIC:-cotacoes}
+      - BRAPI_TOKEN=${BRAPI_TOKEN:-}
+    volumes:
+      - .:/app
+    depends_on:
+      kafka-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    command: python -u scheduler.py
+    environment:
+      - MARKET_DATA_API_URL=http://api:8000/coletar/{}
+      - MARKET_DATA_POLL_INTERVAL_MINUTES=${MARKET_DATA_POLL_INTERVAL_MINUTES:-5}
+      - MARKET_DATA_TICKERS=${MARKET_DATA_TICKERS:-PETR4,VALE3,ITUB4,BBAS3,MGLU3}
+    volumes:
+      - .:/app
+    depends_on:
+      api:
+        condition: service_healthy
 
   spark-bronze:
     build:
@@ -74,31 +126,66 @@ services:
     command: /opt/spark/bin/spark-submit --master spark://spark-master:7077 --driver-memory 1G --executor-memory 1G --total-executor-cores 1 --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,io.delta:delta-spark_2.12:3.0.0,org.apache.hadoop:hadoop-aws:3.3.4 consumer/spark_consumer.py
     environment:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+      - KAFKA_TOPIC=${KAFKA_TOPIC:-cotacoes}
+      - MINIO_ENDPOINT_URL=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-admin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-admin123}
+      - DATA_LAKE_BUCKET=${DATA_LAKE_BUCKET:-datalake}
     volumes:
       - .:/app
     depends_on:
-      - kafka
-      - minio
+      spark-master:
+        condition: service_started
+      spark-worker:
+        condition: service_started
+      kafka-init:
+        condition: service_completed_successfully
+      minio:
+        condition: service_started
 
   spark-silver:
     build:
       context: .
       dockerfile: Dockerfile.spark
     command: /opt/spark/bin/spark-submit --master spark://spark-master:7077 --driver-memory 1G --executor-memory 1G --total-executor-cores 1 --packages io.delta:delta-spark_2.12:3.0.0,org.apache.hadoop:hadoop-aws:3.3.4 consumer/spark_silver.py
+    environment:
+      - MINIO_ENDPOINT_URL=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-admin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-admin123}
+      - DATA_LAKE_BUCKET=${DATA_LAKE_BUCKET:-datalake}
     volumes:
       - .:/app
     depends_on:
-      - spark-bronze
+      spark-master:
+        condition: service_started
+      spark-worker:
+        condition: service_started
+      minio:
+        condition: service_started
+      spark-bronze:
+        condition: service_started
 
   spark-gold:
     build:
       context: .
       dockerfile: Dockerfile.spark
     command: /opt/spark/bin/spark-submit --master spark://spark-master:7077 --driver-memory 1G --executor-memory 1G --total-executor-cores 1 --packages io.delta:delta-spark_2.12:3.0.0,org.apache.hadoop:hadoop-aws:3.3.4 consumer/spark_gold.py
+    environment:
+      - MINIO_ENDPOINT_URL=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-admin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-admin123}
+      - DATA_LAKE_BUCKET=${DATA_LAKE_BUCKET:-datalake}
     volumes:
       - .:/app
     depends_on:
-      - spark-silver
+      spark-master:
+        condition: service_started
+      spark-worker:
+        condition: service_started
+      minio:
+        condition: service_started
+      spark-silver:
+        condition: service_started
 
 volumes:
   minio_data:

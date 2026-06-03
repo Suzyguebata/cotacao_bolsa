@@ -1,6 +1,8 @@
 # Data Pipeline - Ingestão de Dados Ativos B3
 
-Este projeto demonstra um pipeline de dados em tempo real utilizando a API da Brapi, Kafka, Spark Streaming, Delta Lake, MinIO e Trino.
+Este projeto demonstra um pipeline de dados em near real time para cotações de ativos B3 utilizando a API da Brapi, Kafka, Spark Structured Streaming, Delta Lake, MinIO e Trino.
+
+O processamento é contínuo, mas a latência fim a fim depende também da fonte de dados. Durante o desenvolvimento será usada a Brapi Free, com dados defasados. Para a coleta final de evidências do TCC, a estratégia recomendada é contratar temporariamente a Brapi Pro, que reduz o atraso aproximado das cotações para 5 minutos.
 
 ---
 
@@ -38,7 +40,7 @@ graph LR
 
 ## 🖥️ Dashboards de Monitoramento
 
-Após iniciar o pipeline, você pode acompanhar o status em tempo real através destes links:
+Após iniciar o pipeline, você pode acompanhar o status operacional através destes links:
 
 | Serviço | URL de Acesso | Objetivo |
 | :--- | :--- | :--- |
@@ -64,7 +66,35 @@ cd app
 ```bash
 ./start_pipeline.sh
 ```
-*Aguarde o script finalizar. Ele abrirá o console do MinIO (porta 9001) automaticamente.*
+*Aguarde o script finalizar. Ele sobe todos os serviços via Docker Compose, executa os testes Spark no container e abre o console do MinIO (porta 9001) automaticamente.*
+
+Se houver token da Brapi disponível, configure antes de iniciar o Docker Compose:
+```bash
+export BRAPI_TOKEN=seu_token
+export MARKET_DATA_POLL_INTERVAL_MINUTES=5
+```
+
+Sem `BRAPI_TOKEN`, o pipeline usa o acesso gratuito da Brapi. Para desenvolvimento isso é suficiente, mas as evidências finais devem registrar a limitação de atualização da fonte.
+
+Também é possível criar um arquivo `.env` a partir do modelo:
+
+```bash
+cp .env.example .env
+```
+
+Principais configurações:
+
+| Variável | Objetivo | Padrão |
+| :--- | :--- | :--- |
+| `BRAPI_TOKEN` | Token da Brapi Free/Pro. | vazio |
+| `MARKET_DATA_POLL_INTERVAL_MINUTES` | Intervalo do scheduler. | `5` |
+| `MARKET_DATA_TICKERS` | Lista de ativos coletados, separada por vírgula. | `PETR4,VALE3,ITUB4,BBAS3,MGLU3` |
+| `KAFKA_TOPIC` | Tópico Kafka usado pela API e pelo Spark Bronze. | `cotacoes` |
+| `MINIO_ACCESS_KEY` | Usuário do MinIO/S3 local. | `admin` |
+| `MINIO_SECRET_KEY` | Senha do MinIO/S3 local. | `admin123` |
+| `DATA_LAKE_BUCKET` | Bucket usado para Bronze, Silver, Gold e checkpoints. | `datalake` |
+
+API FastAPI e scheduler são serviços conteinerizados no `docker-compose.yml`. A API publica mensagens no Kafka usando `KAFKA_BOOTSTRAP_SERVERS=kafka:29092`, e o scheduler chama a API pela rede interna em `http://api:8000`.
 
 ### 3. Aguardar a Inicialização das Camadas
 **Importante:** O Trino só consegue enxergar as tabelas após o Spark criar os logs do Delta Lake no MinIO.
@@ -81,10 +111,21 @@ docker exec -it app-trino-1 trino
 ```
 
 ### 2. Registrar as Tabelas (Obrigatório após cada Reset)
-Execute os comandos abaixo na ordem. 
+Após as pastas `_delta_log` aparecerem no MinIO para Bronze, Silver e Gold, execute:
 
-⚠️ **Atenção:** Se você tentar registrar cedo demais, o Trino retornará um erro dizendo que o caminho não existe. 
-**Solução:** Se falhar, aguarde mais um minuto e tente o comando `CALL` novamente.
+```bash
+./register_trino_tables.sh
+```
+
+No Windows, também é possível usar:
+
+```bat
+register_trino_tables.bat
+```
+
+O script cria os schemas, registra as tabelas Delta e faz novas tentativas automaticamente caso o Spark ainda não tenha criado os logs Delta.
+
+Referência dos comandos executados:
 
 ```sql
 -- Criar os esquemas
@@ -118,6 +159,22 @@ O ambiente foi configurado para suportar execuções longas (24h+):
 - **Spark Worker**: 4GB RAM.
 - **Drivers/Executors**: 1GB RAM por camada.
 - **Persistência**: Checkpoints automáticos no MinIO para recuperação de falhas.
+
+---
+
+## 🎓 Estratégia de Defesa no TCC
+
+Para manter a defesa tecnicamente correta, o trabalho deve usar a expressão **near real time** em vez de tempo real estrito. A arquitetura processa eventos de forma contínua, mas a atualização do preço depende da Brapi.
+
+Plano adotado:
+
+1. **Desenvolvimento com Brapi Free**: manter o custo zero enquanto o pipeline, os testes e a documentação são estabilizados.
+2. **Coleta final com Brapi Pro**: contratar por um mês próximo da apresentação para coletar evidências com atraso aproximado de 5 minutos.
+3. **Gold em janelas de 5 minutos**: alinhar a agregação final ao intervalo esperado para a coleta paga de evidências. A janela Gold é operacional e baseada em `ingestion_timestamp`, ou seja, mede o comportamento do pipeline por intervalo de ingestão; análises futuras por horário do pregão podem usar `event_timestamp`. A escrita da Gold usa modo `complete` para materializar o agregado atual durante a demonstração.
+4. **Medição de latência fim a fim**: separar latência da fonte, latência de ingestão e latência de processamento entre Bronze, Silver e Gold.
+5. **Trabalho futuro com WebSocket/Cedro**: registrar a integração com Market Data via WebSocket como evolução para dados efetivamente em tempo real, sem colocar essa dependência no caminho crítico da entrega.
+
+Essa escolha reduz risco operacional na apresentação e mantém uma justificativa sólida de Engenharia de Dados: a arquitetura é streaming, enquanto a tempestividade dos dados é limitada pelo provedor contratado.
 
 ---
 *Documentação organizada para suporte ao TCC e apresentações técnicas.*

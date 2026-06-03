@@ -6,33 +6,13 @@ echo "============================================"
 echo
 
 # 1. Subir Docker Compose
-echo "[1/7] Subindo Docker Compose..."
-docker-compose up -d
+echo "[1/4] Subindo Docker Compose..."
+docker-compose up -d --build
 echo
 
-# 2. Ativar ambiente virtual
-echo "[2/7] Ativando ambiente virtual..."
-if [ -f "venv/Scripts/activate" ]; then
-    source venv/Scripts/activate
-elif [ -f "venv/bin/activate" ]; then
-    source venv/bin/activate
-else
-    echo "Ambiente virtual não encontrado. Criando..."
-    python -m venv venv
-    source venv/Scripts/activate 2>/dev/null || source venv/bin/activate
-fi
-echo "Ambiente virtual ativado."
-echo
-
-# 3. Instalar dependências
-echo "[3/7] Instalando dependências..."
-pip install -r requirements.txt
-echo
-
-# 4. Executar Testes Unitários no Docker
-echo "[4/7] Executando Testes Unitários (Spark Transformation)..."
-docker exec -u root app-spark-bronze-1 pip install pytest --quiet
-MSYS_NO_PATHCONV=1 docker exec -u root app-spark-bronze-1 pytest /app/tests/test_spark_logic.py
+# 2. Executar Testes Unitários no Docker
+echo "[2/4] Executando Testes Unitários (Spark Transformation)..."
+MSYS_NO_PATHCONV=1 docker exec -u root app-spark-bronze-1 /usr/bin/python3 -m pytest /app/tests/test_spark_logic.py
 if [ $? -ne 0 ]; then
     echo "[ERRO] Os testes unitários falharam! Verifique a lógica do Spark."
     exit 1
@@ -40,22 +20,13 @@ fi
 echo "Testes aprovados!"
 echo
 
-# 5. Iniciar API FastAPI
-echo "[5/7] Iniciando API (Lambda local)..."
-( python -m uvicorn api.lambda_api:app --reload --port 8000 & )
-sleep 2
-echo "API iniciada na porta 8000."
+# 3. Informar serviços conteinerizados
+echo "[3/4] API e Scheduler iniciados pelo Docker Compose."
+echo "FastAPI Docs: http://localhost:8000/docs"
 echo
 
-# 6. Iniciar Scheduler
-echo "[6/7] Iniciando Scheduler..."
-( python scheduler.py & )
-sleep 2
-echo "Scheduler iniciado."
-echo
-
-# 7. Abrir MinIO Console
-echo "[7/7] Abrindo MinIO Console..."
+# 4. Abrir MinIO Console
+echo "[4/4] Abrindo MinIO Console..."
 if command -v xdg-open >/dev/null; then
     xdg-open http://localhost:9001
 elif command -v open >/dev/null; then

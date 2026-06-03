@@ -27,7 +27,7 @@
 
     <div class="hero">
         <h1>Data Pipeline - Ingestão de Dados Ativos B3</h1>
-        <p>Arquitetura Medallion para Processamento em Tempo Real</p>
+        <p>Arquitetura Medallion para Processamento Near Real Time</p>
     </div>
 
     <div class="container">
@@ -93,6 +93,20 @@ graph LR
             <div class="warning">
                 <strong>⚠️ Nota Importante:</strong> Aguarde 3 minutos após o início para que o Spark crie as pastas no MinIO antes de registrar no Trino.
             </div>
+        </section>
+
+        <section id="estrategia-tcc">
+            <h2>🎓 Estratégia para Defesa do TCC</h2>
+            <p>O pipeline processa dados continuamente, mas a atualização das cotações depende do plano contratado na Brapi. Por isso, a defesa técnica usa near real time em vez de tempo real estrito.</p>
+
+            <h3>Plano adotado</h3>
+            <ol>
+                <li>Desenvolver e validar o pipeline com Brapi Free.</li>
+                <li>Contratar Brapi Pro por um mês próximo da apresentação para coletar evidências com menor atraso.</li>
+                <li>Manter a camada Gold com janelas de 5 minutos, alinhadas à coleta paga de evidências.</li>
+                <li>Medir separadamente latência da fonte, ingestão e processamento entre Bronze, Silver e Gold.</li>
+                <li>Registrar WebSocket/Cedro como trabalho futuro para market data em tempo real.</li>
+            </ol>
         </section>
 
         <section id="trino">
