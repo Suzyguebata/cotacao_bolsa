@@ -12,7 +12,8 @@ BRAPI_SCHEMA = StructType([
             StructField("marketCap", DoubleType(), True),
         ])
     ), True),
-    StructField("requestedAt", StringType(), True)
+    StructField("requestedAt", StringType(), True),
+    StructField("_corrupt_record", StringType(), True),
 ])
 
 
@@ -38,10 +39,14 @@ def transform_kafka_to_bronze(df_kafka):
         col("value").cast("string").alias("json_value"),
     ).withColumn(
         "parsed_data",
-        from_json(col("json_value"), BRAPI_SCHEMA)
+        from_json(
+            col("json_value"),
+            BRAPI_SCHEMA,
+            {"mode": "PERMISSIVE", "columnNameOfCorruptRecord": "_corrupt_record"}
+        )
     ).withColumn(
         "bronze_parse_status",
-        when(col("parsed_data").isNull(), lit("parse_error"))
+        when(col("parsed_data").isNull() | col("parsed_data._corrupt_record").isNotNull(), lit("parse_error"))
         .when(col("parsed_data.results").isNull() | (size(col("parsed_data.results")) == 0), lit("no_results"))
         .otherwise(lit("parsed"))
     ).withColumn(

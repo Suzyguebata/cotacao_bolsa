@@ -43,4 +43,8 @@ jobs:
             --base develop \
             --head "$BRANCH_NAME" \
             --title "Merge $BRANCH_NAME into develop" \
-            --body "PR criado automaticamente para validar a feature antes do merge em develop."
+            --body "PR criado automaticamente para validar a feature antes do merge em develop." || {
+              echo "GitHub Actions is not permitted to create pull requests in this repository."
+              echo "Enable write permissions in Settings > Actions > General > Workflow permissions, or create the PR manually."
+              exit 0
+            }
