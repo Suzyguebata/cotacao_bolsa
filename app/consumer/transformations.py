@@ -1,4 +1,4 @@
-from pyspark.sql.functions import avg, col, count, current_timestamp, date_format, explode, from_json, length, lit, max, min, to_timestamp, trim, window
+from pyspark.sql.functions import avg, col, count, current_timestamp, date_format, explode_outer, from_json, length, lit, max, min, size, to_timestamp, trim, when, window
 from pyspark.sql.types import ArrayType, DoubleType, StringType, StructField, StructType
 
 
@@ -16,20 +16,60 @@ BRAPI_SCHEMA = StructType([
 ])
 
 
+def _optional_column(df, column_name, data_type=None):
+    if column_name in df.columns:
+        value = col(column_name)
+        if data_type:
+            value = value.cast(data_type)
+        return value
+    value = lit(None)
+    if data_type:
+        value = value.cast(data_type)
+    return value
+
+
 def transform_kafka_to_bronze(df_kafka):
-    return df_kafka.select(
+    df_raw = df_kafka.select(
+        _optional_column(df_kafka, "topic", "string").alias("kafka_topic"),
+        _optional_column(df_kafka, "partition", "int").alias("kafka_partition"),
+        _optional_column(df_kafka, "offset", "long").alias("kafka_offset"),
+        _optional_column(df_kafka, "key").cast("string").alias("kafka_key"),
         col("timestamp").alias("kafka_timestamp"),
-        col("value").cast("string").alias("json_value")
-    ).select(
+        col("value").cast("string").alias("json_value"),
+    ).withColumn(
+        "parsed_data",
+        from_json(col("json_value"), BRAPI_SCHEMA)
+    ).withColumn(
+        "bronze_parse_status",
+        when(col("parsed_data").isNull(), lit("parse_error"))
+        .when(col("parsed_data.results").isNull() | (size(col("parsed_data.results")) == 0), lit("no_results"))
+        .otherwise(lit("parsed"))
+    ).withColumn(
+        "ingestion_timestamp",
+        current_timestamp()
+    )
+
+    return df_raw.select(
+        "kafka_topic",
+        "kafka_partition",
+        "kafka_offset",
+        "kafka_key",
         "kafka_timestamp",
-        from_json(col("json_value"), BRAPI_SCHEMA).alias("data")
+        "json_value",
+        "bronze_parse_status",
+        "ingestion_timestamp",
+        explode_outer(col("parsed_data.results")).alias("quote")
     ).select(
+        "kafka_topic",
+        "kafka_partition",
+        "kafka_offset",
+        "kafka_key",
         "kafka_timestamp",
-        explode(col("data.results")).alias("quote")
-    ).select(
-        "kafka_timestamp",
+        "json_value",
+        "bronze_parse_status",
+        "ingestion_timestamp",
         "quote.*"
-    ).withColumn("ingestion_timestamp", current_timestamp())
+    )
 
 
 def transform_bronze_to_silver(df_bronze):

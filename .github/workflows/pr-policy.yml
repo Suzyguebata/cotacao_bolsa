@@ -1,0 +1,41 @@
+name: PR Policy
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - reopened
+      - synchronize
+    branches:
+      - develop
+      - main
+
+jobs:
+  validate-pr-flow:
+    name: Validate source and target branches
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Validate feature to develop
+        if: github.base_ref == 'develop'
+        run: |
+          case "${{ github.head_ref }}" in
+            feature/*)
+              echo "Valid PR flow: ${{ github.head_ref }} -> develop"
+              ;;
+            *)
+              echo "Invalid PR flow: only feature/* branches can target develop."
+              exit 1
+              ;;
+          esac
+
+      - name: Validate develop to main
+        if: github.base_ref == 'main'
+        run: |
+          if [ "${{ github.head_ref }}" != "develop" ]; then
+            echo "Invalid PR flow: only develop can target main."
+            exit 1
+          fi
+
+          echo "Valid PR flow: develop -> main"

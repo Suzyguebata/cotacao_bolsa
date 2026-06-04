@@ -35,8 +35,49 @@ def test_bronze_transformation_logic(spark):
     result = df_parsed.collect()[0]
     assert result["symbol"] == "PETR4"
     assert result["regularMarketPrice"] == 35.5
+    assert result["json_value"] == kafka_data[0][1]
+    assert result["bronze_parse_status"] == "parsed"
     assert "kafka_timestamp" in df_parsed.columns
     assert "ingestion_timestamp" in df_parsed.columns
+
+
+def test_bronze_preserves_kafka_metadata(spark):
+    kafka_data = [
+        ("cotacoes", 0, 42, "PETR4", datetime.datetime.now(), '{"results": [{"symbol": "PETR4", "regularMarketPrice": 35.5, "regularMarketTime": "2023-10-27T10:00:00Z"}]}')
+    ]
+    schema_kafka = StructType([
+        StructField("topic", StringType(), True),
+        StructField("partition", StringType(), True),
+        StructField("offset", StringType(), True),
+        StructField("key", StringType(), True),
+        StructField("timestamp", TimestampType(), True),
+        StructField("value", StringType(), True)
+    ])
+    df_input = spark.createDataFrame(kafka_data, schema_kafka)
+
+    result = transform_kafka_to_bronze(df_input).collect()[0]
+
+    assert result["kafka_topic"] == "cotacoes"
+    assert result["kafka_partition"] == 0
+    assert result["kafka_offset"] == 42
+    assert result["kafka_key"] == "PETR4"
+
+
+def test_bronze_keeps_invalid_json_for_audit(spark):
+    kafka_data = [
+        (datetime.datetime.now(), '{"results": [')
+    ]
+    schema_kafka = StructType([
+        StructField("timestamp", TimestampType(), True),
+        StructField("value", StringType(), True)
+    ])
+    df_input = spark.createDataFrame(kafka_data, schema_kafka)
+
+    result = transform_kafka_to_bronze(df_input).collect()[0]
+
+    assert result["json_value"] == kafka_data[0][1]
+    assert result["bronze_parse_status"] == "parse_error"
+    assert result["symbol"] is None
 
 def test_silver_transformation_logic(spark):
     # 1. Setup - Dados simulando a Bronze

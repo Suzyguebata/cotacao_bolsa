@@ -1,0 +1,46 @@
+name: Auto PR Feature to Develop
+
+on:
+  create:
+  push:
+    branches:
+      - "feature/**"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  create-pr:
+    name: Create feature PR
+    runs-on: ubuntu-latest
+    if: (github.event_name == 'create' && github.event.ref_type == 'branch' && startsWith(github.event.ref, 'feature/')) || (github.event_name == 'push' && startsWith(github.ref_name, 'feature/'))
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'create' && github.event.ref || github.ref_name }}
+
+      - name: Create pull request to develop
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH_NAME: ${{ github.event_name == 'create' && github.event.ref || github.ref_name }}
+        run: |
+          git fetch origin develop:refs/remotes/origin/develop --depth=1
+
+          if [ -z "$(git log --oneline origin/develop..HEAD)" ]; then
+            echo "$BRANCH_NAME has no commits ahead of develop yet. Skipping PR creation."
+            exit 0
+          fi
+
+          if gh pr list --head "$BRANCH_NAME" --base develop --state open --json number --jq '.[0].number' | grep -q '[0-9]'; then
+            echo "An open PR from $BRANCH_NAME to develop already exists."
+            exit 0
+          fi
+
+          gh pr create \
+            --base develop \
+            --head "$BRANCH_NAME" \
+            --title "Merge $BRANCH_NAME into develop" \
+            --body "PR criado automaticamente para validar a feature antes do merge em develop."
