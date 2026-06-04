@@ -11,8 +11,10 @@ import os
 from typing import Any, Dict, List, Optional
 
 from observability.logging_utils import configure_json_logging, log_event
+from prometheus_fastapi_instrumentator import Instrumentator
 
 app = FastAPI()
+Instrumentator().instrument(app).expose(app)
 
 producer = None
 KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "cotacoes")

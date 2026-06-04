@@ -77,14 +77,14 @@ def transform_kafka_to_bronze(df_kafka):
     )
 
 
-def transform_bronze_to_silver(df_bronze):
+def transform_bronze_to_silver(df_bronze, watermark_duration="15 minutes"):
     df_prepared = df_bronze.withColumn(
         "event_timestamp",
         to_timestamp(col("regularMarketTime"))
     ).withColumn(
         "date",
         date_format(col("event_timestamp"), "yyyy-MM-dd")
-    )
+    ).withWatermark("event_timestamp", watermark_duration)
 
     return df_prepared.select(
         "kafka_timestamp",

@@ -66,6 +66,7 @@ def main():
     query = df_parsed.writeStream \
         .format("delta") \
         .outputMode("append") \
+        .trigger(processingTime='5 minutes') \
         .option("checkpointLocation", CHECKPOINT_PATH) \
         .start(BRONZE_PATH)
 

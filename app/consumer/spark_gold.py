@@ -59,6 +59,7 @@ def main():
     query = df_gold.writeStream \
         .format("delta") \
         .outputMode("complete") \
+        .trigger(processingTime='5 minutes') \
         .option("checkpointLocation", CHECKPOINT_GOLD) \
         .start(GOLD_PATH)
 

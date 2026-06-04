@@ -140,17 +140,56 @@ SELECT
 FROM delta.gold.media_precos_ingestao_5min
 ORDER BY window_start DESC;
 
--- 10. AGREGADOS GOLD FINANCEIRA (JANELA DE EVENTO 5 MIN)
--- Consulta a camada de análise financeira baseada no horário real da cotação.
-SELECT
-    window_start,
-    window_end,
-    window_basis,
+-- 11. PERCENTIS DE LATÊNCIA POR TICKER (P50, P95, P99)
+-- Demonstra a distribuição do atraso entre evento e ingestão final.
+SELECT ticker,
+   approx_percentile(date_diff('second', event_timestamp, ingestion_timestamp), 0.5) AS p50,
+   approx_percentile(date_diff('second', event_timestamp, ingestion_timestamp), 0.95) AS p95,
+   approx_percentile(date_diff('second', event_timestamp, ingestion_timestamp), 0.99) AS p99,
+   count(*) AS total
+ FROM delta.silver.cotacoes
+ WHERE event_timestamp IS NOT NULL AND ingestion_timestamp IS NOT NULL
+ GROUP BY ticker
+ ORDER BY p95 DESC;
+
+-- 12. ANÁLISE DE LATE ARRIVALS (THRESHOLD 300S)
+-- Quantifica dados que chegaram com mais de 5 minutos de atraso em relação ao mercado.
+SELECT ticker, 
+       count(*) AS late_count, 
+       round(100.0 * count(*) / sum(count(*)) OVER (), 2) AS pct_late
+ FROM delta.silver.cotacoes
+ WHERE date_diff('second', event_timestamp, ingestion_timestamp) > 300
+ GROUP BY ticker 
+ ORDER BY late_count DESC;
+
+-- 14. DATA QUALITY SCORE (DQS) POR TICKER
+-- Consolida as dimensões de qualidade em um score de 0 a 100.
+-- Dimensões: Sucesso de Parsing, Completude (preço/ticker) e Integridade de Tempo.
+WITH metrics AS (
+    SELECT 
+        ticker,
+        count(*) as total_processado,
+        -- Validade: Ticker e Preço presentes e corretos
+        count_if(ticker IS NOT NULL AND price > 0) as registros_validos,
+        -- Completude: MarketCap (que costuma falhar) presente
+        count_if(marketCap IS NOT NULL AND marketCap > 0) as com_marketcap,
+        -- Freshness: Latência menor que 2 minutos (Near Real Time)
+        count_if(date_diff('second', event_timestamp, ingestion_timestamp) < 120) as dentro_sla_latencia,
+        -- Integridade: Mudança de preço não nula
+        count_if(change IS NOT NULL) as com_change
+    FROM delta.silver.cotacoes
+    GROUP BY ticker
+)
+SELECT 
     ticker,
-    avg_price,
-    min_price,
-    max_price,
-    sample_count,
-    calculation_timestamp
-FROM delta.gold.media_precos_evento_5min
-ORDER BY window_start DESC;
+    total_processado,
+    round(100.0 * registros_validos / total_processado, 2) as validade_score,
+    round(100.0 * com_marketcap / total_processado, 2) as completude_score,
+    round(100.0 * dentro_sla_latencia / total_processado, 2) as freshness_score,
+    round(
+        ( (1.0 * registros_validos / total_processado) + 
+          (1.0 * com_marketcap / total_processado) + 
+          (1.0 * dentro_sla_latencia / total_processado) ) / 3.0 * 100, 2
+    ) as global_quality_score
+FROM metrics
+ORDER BY global_quality_score DESC;

@@ -60,6 +60,7 @@ def main():
         .format("delta") \
         .outputMode("append") \
         .partitionBy("ticker", "date") \
+        .trigger(processingTime='5 minutes') \
         .option("checkpointLocation", CHECKPOINT_SILVER) \
         .start(SILVER_PATH)
 
