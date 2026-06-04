@@ -1,6 +1,12 @@
 fastapi
+fastapi
 uvicorn[standard]
 kafka-python
 requests
 apscheduler
 python-dotenv
+minio
+pydantic
+prometheus-fastapi-instrumentator
+
+pytest
