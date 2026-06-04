@@ -31,6 +31,9 @@ jobs:
       - name: Build API image
         run: docker compose build api
 
+      - name: Run API validation tests
+        run: docker compose run --rm --no-deps api python -m pytest /app/tests/test_api_validation.py /app/tests/test_scheduler.py
+
       - name: Check API and scheduler syntax
         run: docker compose run --rm --no-deps api python -m py_compile /app/api/lambda_api.py /app/scheduler.py
 

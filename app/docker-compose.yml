@@ -67,8 +67,8 @@ services:
     environment:
       - SPARK_WORKER_WEBUI_PORT=8081
       - SPARK_MASTER=spark://spark-master:7077
-      - SPARK_WORKER_CORES=3
-      - SPARK_WORKER_MEMORY=4G
+      - SPARK_WORKER_CORES=5
+      - SPARK_WORKER_MEMORY=6G
 
   trino:
     image: trinodb/trino:435
@@ -92,6 +92,7 @@ services:
       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
       - KAFKA_TOPIC=${KAFKA_TOPIC:-cotacoes}
       - BRAPI_TOKEN=${BRAPI_TOKEN:-}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - .:/app
     depends_on:
@@ -113,6 +114,7 @@ services:
       - MARKET_DATA_API_URL=http://api:8000/coletar/{}
       - MARKET_DATA_POLL_INTERVAL_MINUTES=${MARKET_DATA_POLL_INTERVAL_MINUTES:-5}
       - MARKET_DATA_TICKERS=${MARKET_DATA_TICKERS:-PETR4,VALE3,ITUB4,BBAS3,MGLU3}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - .:/app
     depends_on:
@@ -131,6 +133,7 @@ services:
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-admin}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-admin123}
       - DATA_LAKE_BUCKET=${DATA_LAKE_BUCKET:-datalake}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - .:/app
     depends_on:
@@ -153,6 +156,7 @@ services:
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-admin}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-admin123}
       - DATA_LAKE_BUCKET=${DATA_LAKE_BUCKET:-datalake}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - .:/app
     depends_on:
@@ -165,7 +169,30 @@ services:
       spark-bronze:
         condition: service_started
 
-  spark-gold:
+  spark-quarantine:
+    build:
+      context: .
+      dockerfile: Dockerfile.spark
+    command: /opt/spark/bin/spark-submit --master spark://spark-master:7077 --driver-memory 1G --executor-memory 1G --total-executor-cores 1 --packages io.delta:delta-spark_2.12:3.0.0,org.apache.hadoop:hadoop-aws:3.3.4 consumer/spark_quarantine.py
+    environment:
+      - MINIO_ENDPOINT_URL=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-admin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-admin123}
+      - DATA_LAKE_BUCKET=${DATA_LAKE_BUCKET:-datalake}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - .:/app
+    depends_on:
+      spark-master:
+        condition: service_started
+      spark-worker:
+        condition: service_started
+      minio:
+        condition: service_started
+      spark-bronze:
+        condition: service_started
+
+  spark-gold-operational:
     build:
       context: .
       dockerfile: Dockerfile.spark
@@ -175,6 +202,30 @@ services:
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-admin}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-admin123}
       - DATA_LAKE_BUCKET=${DATA_LAKE_BUCKET:-datalake}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - .:/app
+    depends_on:
+      spark-master:
+        condition: service_started
+      spark-worker:
+        condition: service_started
+      minio:
+        condition: service_started
+      spark-silver:
+        condition: service_started
+
+  spark-gold-financial:
+    build:
+      context: .
+      dockerfile: Dockerfile.spark
+    command: /opt/spark/bin/spark-submit --master spark://spark-master:7077 --driver-memory 1G --executor-memory 1G --total-executor-cores 1 --packages io.delta:delta-spark_2.12:3.0.0,org.apache.hadoop:hadoop-aws:3.3.4 consumer/spark_gold_financial.py
+    environment:
+      - MINIO_ENDPOINT_URL=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-admin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-admin123}
+      - DATA_LAKE_BUCKET=${DATA_LAKE_BUCKET:-datalake}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - .:/app
     depends_on:

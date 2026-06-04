@@ -23,10 +23,13 @@ jobs:
         run: docker compose config --quiet
 
       - name: Build application images
-        run: docker compose build api scheduler spark-bronze spark-silver spark-gold
+        run: docker compose build api scheduler spark-bronze spark-silver spark-quarantine spark-gold-operational spark-gold-financial
 
       - name: Run Spark transformation tests
         run: docker compose run --rm --no-deps --user root spark-bronze /usr/bin/python3 -m pytest /app/tests/test_spark_logic.py
+
+      - name: Run API validation tests
+        run: docker compose run --rm --no-deps api python -m pytest /app/tests/test_api_validation.py /app/tests/test_scheduler.py
 
       - name: Check API and scheduler syntax
         run: docker compose run --rm --no-deps api python -m py_compile /app/api/lambda_api.py /app/scheduler.py

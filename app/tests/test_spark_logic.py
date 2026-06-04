@@ -5,8 +5,10 @@ import datetime
 
 from consumer.transformations import (
     transform_bronze_to_silver,
+    transform_bronze_to_quarantine,
     transform_kafka_to_bronze,
     transform_silver_to_gold,
+    transform_silver_to_gold_financial,
 )
 
 @pytest.fixture(scope="session")
@@ -137,6 +139,40 @@ def test_silver_filters_invalid_records(spark):
     assert rows[0]["ticker"] == "PETR4"
 
 
+def test_quarantine_keeps_rejected_records_with_reasons(spark):
+    now = datetime.datetime.now()
+    bronze_data = [
+        (None, None, None, None, now, '{"results":[{"symbol":"PETR4"}]}', "parsed", "PETR4", 35.5, "2023-10-27T10:00:00Z", 0.5, 1000000.0, now),
+        (None, None, None, None, now, '{"results":[{"symbol":null}]}', "parsed", None, 35.5, "2023-10-27T10:00:00Z", 0.5, 1000000.0, now),
+        (None, None, None, None, now, '{"results":[{"symbol":"VALE3"}]}', "parsed", "VALE3", -1.0, "2023-10-27T10:00:00Z", 0.5, 1000000.0, now),
+        (None, None, None, None, now, '{"results": [', "parse_error", None, None, None, None, None, now),
+    ]
+    schema_bronze = StructType([
+        StructField("kafka_topic", StringType(), True),
+        StructField("kafka_partition", StringType(), True),
+        StructField("kafka_offset", StringType(), True),
+        StructField("kafka_key", StringType(), True),
+        StructField("kafka_timestamp", TimestampType(), True),
+        StructField("json_value", StringType(), True),
+        StructField("bronze_parse_status", StringType(), True),
+        StructField("symbol", StringType(), True),
+        StructField("regularMarketPrice", DoubleType(), True),
+        StructField("regularMarketTime", StringType(), True),
+        StructField("regularMarketChange", DoubleType(), True),
+        StructField("marketCap", DoubleType(), True),
+        StructField("ingestion_timestamp", TimestampType(), True),
+    ])
+    df_bronze = spark.createDataFrame(bronze_data, schema_bronze)
+
+    rows = transform_bronze_to_quarantine(df_bronze).collect()
+    reasons = {row["json_value"]: row["rejection_reason"] for row in rows}
+
+    assert len(rows) == 3
+    assert reasons['{"results":[{"symbol":null}]}'] == "invalid_ticker"
+    assert reasons['{"results":[{"symbol":"VALE3"}]}'] == "invalid_price"
+    assert "parse_error" in reasons['{"results": [']
+
+
 def test_silver_deduplicates_same_quote(spark):
     now = datetime.datetime.now()
     bronze_data = [
@@ -185,4 +221,29 @@ def test_gold_transformation_logic(spark):
     assert results["PETR4"]["max_price"] == 37.0
     assert results["PETR4"]["sample_count"] == 2
     assert results["PETR4"]["window_basis"] == "ingestion_timestamp"
+    assert results["VALE3"]["sample_count"] == 1
+
+
+def test_financial_gold_uses_event_time_windows(spark):
+    event_time = datetime.datetime(2023, 10, 27, 10, 2, 0)
+    silver_data = [
+        (event_time, datetime.datetime(2023, 10, 27, 10, 7, 0), "PETR4", 35.0),
+        (event_time + datetime.timedelta(minutes=1), datetime.datetime(2023, 10, 27, 10, 8, 0), "PETR4", 37.0),
+        (event_time, datetime.datetime(2023, 10, 27, 10, 7, 0), "VALE3", 70.0),
+    ]
+    schema_silver = StructType([
+        StructField("event_timestamp", TimestampType(), True),
+        StructField("ingestion_timestamp", TimestampType(), True),
+        StructField("ticker", StringType(), True),
+        StructField("price", DoubleType(), True),
+    ])
+    df_silver = spark.createDataFrame(silver_data, schema_silver)
+
+    df_gold = transform_silver_to_gold_financial(df_silver)
+    results = {row["ticker"]: row for row in df_gold.collect()}
+
+    assert results["PETR4"]["avg_price"] == 36.0
+    assert results["PETR4"]["sample_count"] == 2
+    assert results["PETR4"]["window_basis"] == "event_timestamp"
+    assert results["PETR4"]["window_start"] == datetime.datetime(2023, 10, 27, 10, 0, 0)
     assert results["VALE3"]["sample_count"] == 1

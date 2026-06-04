@@ -28,7 +28,11 @@ call :run_with_retry "Registrar delta.bronze.cotacoes" "CALL delta.system.regist
 if errorlevel 1 exit /b 1
 call :run_with_retry "Registrar delta.silver.cotacoes" "CALL delta.system.register_table('silver', 'cotacoes', 's3a://datalake/silver/cotacoes')"
 if errorlevel 1 exit /b 1
-call :run_with_retry "Registrar delta.gold.media_precos_5min" "CALL delta.system.register_table('gold', 'media_precos_5min', 's3a://datalake/gold/media_precos_5min')"
+call :run_with_retry "Registrar delta.silver.cotacoes_rejeitadas" "CALL delta.system.register_table('silver', 'cotacoes_rejeitadas', 's3a://datalake/silver/cotacoes_rejeitadas')"
+if errorlevel 1 exit /b 1
+call :run_with_retry "Registrar delta.gold.media_precos_ingestao_5min" "CALL delta.system.register_table('gold', 'media_precos_ingestao_5min', 's3a://datalake/gold/media_precos_ingestao_5min')"
+if errorlevel 1 exit /b 1
+call :run_with_retry "Registrar delta.gold.media_precos_evento_5min" "CALL delta.system.register_table('gold', 'media_precos_evento_5min', 's3a://datalake/gold/media_precos_evento_5min')"
 if errorlevel 1 exit /b 1
 
 echo Tabelas disponiveis no Trino:
@@ -44,21 +48,36 @@ exit /b 0
 set LABEL=%~1
 set SQL=%~2
 set ATTEMPT=1
+set OUTPUT_FILE=%TEMP%\trino_register_%RANDOM%.log
 
 :retry_loop
 echo [!ATTEMPT!/%TRINO_REGISTER_MAX_ATTEMPTS%] %LABEL%
-docker exec "%TRINO_CONTAINER%" trino --execute "%SQL%"
+docker exec "%TRINO_CONTAINER%" trino --execute "%SQL%" > "!OUTPUT_FILE!" 2>&1
 if not errorlevel 1 (
+    type "!OUTPUT_FILE!"
+    del "!OUTPUT_FILE!" >nul 2>&1
     echo OK: %LABEL%
     echo.
     goto :eof
 )
 
+findstr /i /c:"already exists" /c:"Table already exists" "!OUTPUT_FILE!" >nul
+if not errorlevel 1 (
+    type "!OUTPUT_FILE!"
+    del "!OUTPUT_FILE!" >nul 2>&1
+    echo OK: %LABEL% ja estava registrada.
+    echo.
+    goto :eof
+)
+
 if !ATTEMPT! geq %TRINO_REGISTER_MAX_ATTEMPTS% (
+    type "!OUTPUT_FILE!"
+    del "!OUTPUT_FILE!" >nul 2>&1
     echo [ERRO] Falha ao executar: %LABEL%
     exit /b 1
 )
 
+type "!OUTPUT_FILE!"
 echo Aguardando %TRINO_REGISTER_SLEEP_SECONDS% segundo(s) antes de tentar novamente...
 echo.
 timeout /t %TRINO_REGISTER_SLEEP_SECONDS% /nobreak >nul

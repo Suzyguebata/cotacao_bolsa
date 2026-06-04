@@ -20,6 +20,14 @@ QUERIES = {
             count_if(ingestion_timestamp IS NULL) as ingestoes_invalidas_remanescentes
         FROM delta.silver.cotacoes;
     """,
+    "rejeicoes_silver": """
+        SELECT
+            rejection_reason,
+            count(*) as total_rejeitados
+        FROM delta.silver.cotacoes_rejeitadas
+        GROUP BY rejection_reason
+        ORDER BY total_rejeitados DESC;
+    """,
     "duplicidades_bronze": """
         SELECT
             symbol as ticker,
@@ -69,8 +77,22 @@ QUERIES = {
             window_basis,
             calculation_timestamp,
             date_diff('second', window_end, calculation_timestamp) as latencia_calculo_gold_segundos
-        FROM delta.gold.media_precos_5min
+        FROM delta.gold.media_precos_ingestao_5min
         ORDER BY window_end DESC
+        LIMIT 10;
+    """,
+    "agregados_financeiros_gold": """
+        SELECT
+            ticker,
+            window_start,
+            window_end,
+            window_basis,
+            avg_price,
+            min_price,
+            max_price,
+            sample_count
+        FROM delta.gold.media_precos_evento_5min
+        ORDER BY window_start DESC
         LIMIT 10;
     """,
     "throughput_silver": """

@@ -10,7 +10,11 @@ SELECT 'Bronze' as camada, count(*) as total FROM delta.bronze.cotacoes
 UNION ALL
 SELECT 'Silver' as camada, count(*) as total FROM delta.silver.cotacoes
 UNION ALL
-SELECT 'Gold' as camada, count(*) as total FROM delta.gold.media_precos_5min;
+SELECT 'Silver Rejeitados' as camada, count(*) as total FROM delta.silver.cotacoes_rejeitadas
+UNION ALL
+SELECT 'Gold Operacional' as camada, count(*) as total FROM delta.gold.media_precos_ingestao_5min
+UNION ALL
+SELECT 'Gold Financeira' as camada, count(*) as total FROM delta.gold.media_precos_evento_5min;
 
 -- 2. THROUGHPUT (VAZÃO) DE PROCESSAMENTO
 -- Analisa quantos registros foram processados por minuto na camada Silver.
@@ -24,7 +28,7 @@ ORDER BY 1 DESC;
 
 -- 3. ANÁLISE DE NEGÓCIO (ATIVOS FINANCEIROS)
 -- Calcula métricas financeiras sobre os dados refinados da Silver.
-SELECT 
+SELECT
     ticker,
     count(*) as num_amostras,
     round(avg(price), 2) as preco_medio,
@@ -52,6 +56,13 @@ SELECT
     count_if(event_timestamp IS NULL) as eventos_invalidos_remanescentes,
     count_if(ingestion_timestamp IS NULL) as ingestoes_invalidas_remanescentes
 FROM delta.silver.cotacoes;
+
+SELECT
+    rejection_reason,
+    count(*) as total_rejeitados
+FROM delta.silver.cotacoes_rejeitadas
+GROUP BY rejection_reason
+ORDER BY total_rejeitados DESC;
 
 SELECT
     symbol as ticker,
@@ -115,9 +126,8 @@ FROM delta.silver.cotacoes
 GROUP BY ticker, "date"
 ORDER BY ticker, "date";
 
--- 9. AGREGADOS GOLD (MÉDIA MÓVEL 5 MIN)
--- Consulta a camada final de agregação com a latência operacional de cálculo.
--- A janela Gold atual é baseada em ingestion_timestamp, não no horário do pregão.
+-- 9. AGREGADOS GOLD OPERACIONAL (JANELA DE INGESTÃO 5 MIN)
+-- Consulta a camada de agregação operacional baseada em ingestion_timestamp.
 SELECT 
     window_start,
     window_end,
@@ -127,5 +137,20 @@ SELECT
     sample_count,
     calculation_timestamp,
     date_diff('second', window_end, calculation_timestamp) as latencia_calculo_gold_segundos
-FROM delta.gold.media_precos_5min
+FROM delta.gold.media_precos_ingestao_5min
+ORDER BY window_start DESC;
+
+-- 10. AGREGADOS GOLD FINANCEIRA (JANELA DE EVENTO 5 MIN)
+-- Consulta a camada de análise financeira baseada no horário real da cotação.
+SELECT
+    window_start,
+    window_end,
+    window_basis,
+    ticker,
+    avg_price,
+    min_price,
+    max_price,
+    sample_count,
+    calculation_timestamp
+FROM delta.gold.media_precos_evento_5min
 ORDER BY window_start DESC;

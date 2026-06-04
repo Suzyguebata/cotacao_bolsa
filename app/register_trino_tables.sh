@@ -64,7 +64,9 @@ run_with_retry "Criar schema gold" "CREATE SCHEMA IF NOT EXISTS delta.gold" || f
 
 run_with_retry "Registrar delta.bronze.cotacoes" "CALL delta.system.register_table(schema_name => 'bronze', table_name => 'cotacoes', table_location => 's3a://datalake/bronze/cotacoes')" || failures=1
 run_with_retry "Registrar delta.silver.cotacoes" "CALL delta.system.register_table(schema_name => 'silver', table_name => 'cotacoes', table_location => 's3a://datalake/silver/cotacoes')" || failures=1
-run_with_retry "Registrar delta.gold.media_precos_5min" "CALL delta.system.register_table(schema_name => 'gold', table_name => 'media_precos_5min', table_location => 's3a://datalake/gold/media_precos_5min')" || failures=1
+run_with_retry "Registrar delta.silver.cotacoes_rejeitadas" "CALL delta.system.register_table(schema_name => 'silver', table_name => 'cotacoes_rejeitadas', table_location => 's3a://datalake/silver/cotacoes_rejeitadas')" || failures=1
+run_with_retry "Registrar delta.gold.media_precos_ingestao_5min" "CALL delta.system.register_table(schema_name => 'gold', table_name => 'media_precos_ingestao_5min', table_location => 's3a://datalake/gold/media_precos_ingestao_5min')" || failures=1
+run_with_retry "Registrar delta.gold.media_precos_evento_5min" "CALL delta.system.register_table(schema_name => 'gold', table_name => 'media_precos_evento_5min', table_location => 's3a://datalake/gold/media_precos_evento_5min')" || failures=1
 
 if [ "$failures" -ne 0 ]; then
     echo "[ERRO] Uma ou mais tabelas não puderam ser registradas."
