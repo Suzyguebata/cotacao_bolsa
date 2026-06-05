@@ -6,7 +6,7 @@ from pyspark.sql import SparkSession
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from minio import Minio
-from consumer.transformations import transform_kafka_to_bronze
+from consumer.tratamento import transformar_kafka_para_bronze
 from observability.logging_utils import configure_json_logging, log_event
 
 # Configurações de conexão (Ajustadas para rodar dentro do Docker)
@@ -61,7 +61,7 @@ def main():
         .option("startingOffsets", "earliest") \
         .load()
 
-    df_parsed = transform_kafka_to_bronze(df_kafka)
+    df_parsed = transformar_kafka_para_bronze(df_kafka)
 
     query = df_parsed.writeStream \
         .format("delta") \

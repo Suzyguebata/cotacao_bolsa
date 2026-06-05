@@ -1,19 +1,22 @@
-name: Release CI
+name: Feature CI
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 on:
+  push:
+    branches:
+      - "feature/**"
   pull_request:
     branches:
-      - main
+      - develop
 
 jobs:
-  release-validation:
-    name: Full release validation
+  tests:
+    name: Spark and API checks
     runs-on: ubuntu-latest
-    if: github.head_ref == 'develop'
+    if: github.event_name == 'push' || startsWith(github.head_ref, 'feature/')
 
     defaults:
       run:
@@ -23,21 +26,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate Docker Compose config
-        run: docker compose config --quiet
-
-      - name: Build application images
-        run: docker compose build api scheduler spark-bronze spark-silver spark-quarantine spark-gold-operational spark-gold-financial
+      - name: Build Spark image
+        run: docker compose build spark-bronze
 
       - name: Run Spark transformation tests with coverage (persist results)
         run: |
           CONTAINER_NAME=spark-test
           docker compose run --no-deps --user root --name $CONTAINER_NAME spark-bronze /usr/bin/python3 -m pytest /app/tests/test_spark_logic.py --cov=app --cov-report=xml:/app/coverage-spark.xml || true
-          # copy coverage from container to workspace so Sonar scanner on runner can access it
           if docker ps -a --format '{{.Names}}' | grep -q "^$CONTAINER_NAME$"; then
             docker cp "$CONTAINER_NAME":/app/coverage-spark.xml "$GITHUB_WORKSPACE/coverage-spark.xml" || true
             docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
           fi
+
+      - name: Build API image
+        run: docker compose build api
 
       - name: Run API validation tests with coverage (persist results)
         run: |

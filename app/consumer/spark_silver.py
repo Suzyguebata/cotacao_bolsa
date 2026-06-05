@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import time
 from minio import Minio
-from consumer.transformations import transform_bronze_to_silver
+from consumer.tratamento import transformar_bronze_para_silver
 from observability.logging_utils import configure_json_logging, log_event
 
 MINIO_ENDPOINT_URL = os.getenv("MINIO_ENDPOINT_URL", "minio:9000")
@@ -54,12 +54,12 @@ def main():
         .format("delta") \
         .load(BRONZE_PATH)
 
-    df_silver = transform_bronze_to_silver(df_bronze)
+    df_silver = transformar_bronze_para_silver(df_bronze)
 
     query = df_silver.writeStream \
         .format("delta") \
         .outputMode("append") \
-        .partitionBy("ticker", "date") \
+        .partitionBy("ticket_ativo_b3", "data") \
         .trigger(processingTime='5 minutes') \
         .option("checkpointLocation", CHECKPOINT_SILVER) \
         .start(SILVER_PATH)

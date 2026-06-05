@@ -23,15 +23,32 @@ logger = configure_json_logging("api")
 
 class BrapiQuote(BaseModel):
     symbol: Optional[str] = None
+    shortName: Optional[str] = None
+    longName: Optional[str] = None
+    currency: Optional[str] = None
     regularMarketPrice: Optional[float] = None
-    regularMarketTime: Optional[str] = None
+    regularMarketDayHigh: Optional[float] = None
+    regularMarketDayLow: Optional[float] = None
+    regularMarketDayRange: Optional[str] = None
     regularMarketChange: Optional[float] = None
+    regularMarketChangePercent: Optional[float] = None
+    regularMarketTime: Optional[str] = None
     marketCap: Optional[float] = None
+    regularMarketVolume: Optional[int] = None
+    regularMarketPreviousClose: Optional[float] = None
+    regularMarketOpen: Optional[float] = None
+    fiftyTwoWeekRange: Optional[str] = None
+    fiftyTwoWeekLow: Optional[float] = None
+    fiftyTwoWeekHigh: Optional[float] = None
+    priceEarnings:  Optional[float] = None
+    earningsPerShare: Optional[float] = None
+    logourl: Optional[str] = None
 
 
 class BrapiResponse(BaseModel):
     results: List[BrapiQuote]
     requestedAt: Optional[str] = None
+    took: Optional[int] = None
 
 
 def _model_to_dict(model: BaseModel) -> Dict[str, Any]:

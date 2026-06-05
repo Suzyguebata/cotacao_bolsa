@@ -9,7 +9,32 @@ O processamento é contínuo, mas a latência fim a fim depende também da fonte
 ## 🛠️ Requisitos e Tecnologias
 - **Docker & Docker Compose**
 - **Git Bash** (recomendado para Windows)
-- **Tecnologias**: FastAPI, Kafka, Spark 3.5, Delta Lake, MinIO, Trino.
+- **Tecnologias**: FastAPI, Kafka, Spark 3.5, Delta Lake, MinIO, Trino, Prometheus, Grafana.
+
+---
+
+## ⚡ Guia Rápido: Teste Fim-a-Fim (E2E)
+
+Para validar o pipeline completo e ver os dados no Grafana, siga este roteiro exato:
+
+1.  **Limpeza Inicial (Obrigatório):**
+    No terminal, dentro da pasta `app`, execute `./reset_pipeline.sh`. Isso garante que você comece sem resquícios de testes anteriores.
+
+2.  **Subida do Pipeline:**
+    Execute `./start_pipeline.sh`. Aguarde o script finalizar o build e subir os containers.
+
+3.  **O Tempo do Spark (Aguarde 5-7 minutos):**
+    O Spark está configurado para escrever no Data Lake a cada **5 minutos**.
+    *   Acesse o [MinIO](http://localhost:9001) (admin/admin123).
+    *   Entre no bucket `datalake`.
+    *   **Só prossiga quando** vir as pastas `bronze`, `silver` e `gold` contendo uma subpasta chamada `_delta_log`.
+
+4.  **Registro no Banco (Trino):**
+    Com os logs visíveis no MinIO, execute `./register_trino_tables.sh`. Esse passo "avisa" ao Trino que as tabelas existem.
+
+5.  **Visualização Final:**
+    Acesse o [Grafana](http://localhost:3001) (admin/admin) e abra o dashboard **`[TCC] Data Quality & Performance - v10`**.
+    *   *Nota:* O gráfico de **Ingestão** aparece na hora. Os gráficos de **Qualidade e Latência** aparecem assim que o passo 4 for concluído.
 
 ---
 
@@ -18,23 +43,26 @@ O processamento é contínuo, mas a latência fim a fim depende também da fonte
 ```mermaid
 graph LR
     subgraph Ingestao
-        API[FastAPI] --> Kafka[Kafka Topic: cotacoes]
+        API[FastAPI] -- "Instrumentação Prometheus" --> Kafka[Kafka Topic: cotacoes]
     end
 
     subgraph "Processamento Spark (Medallion)"
         Kafka --> Bronze[Camada Bronze: RAW]
         Bronze --> Silver[Camada Silver: Refined]
-        Bronze --> Rejeitados[Silver: Rejeitados]
+        Bronze -- "Filtros de Qualidade" --> Quarentena[Silver: Quarentena/DLQ]
         Silver --> GoldOp[Gold Operacional: Ingestion Time]
         Silver --> GoldFin[Gold Financeira: Event Time]
     end
 
     subgraph Armazenamento
-        Bronze & Silver & Rejeitados & GoldOp & GoldFin --- MinIO[(MinIO / S3)]
+        Bronze & Silver & Quarentena & GoldOp & GoldFin --- MinIO[(MinIO / S3)]
     end
 
-    subgraph Analise
+    subgraph Analise_e_Monitoramento
         MinIO --- Trino[Trino SQL]
+        Trino -- "DQS Metrics" --> Grafana[Grafana Dashboards]
+        API -- "Metrics" --> Prometheus[Prometheus]
+        Prometheus --> Grafana
     end
 ```
 
@@ -46,10 +74,25 @@ Após iniciar o pipeline, você pode acompanhar o status operacional através de
 
 | Serviço | URL de Acesso | Objetivo |
 | :--- | :--- | :--- |
+| **Grafana** | [http://localhost:3001](http://localhost:3001) | **Dashboard Principal: Saúde e Qualidade (DQS)** |
+| **Prometheus** | [http://localhost:9090](http://localhost:9090) | Consultar métricas brutas da API e Spark. |
 | **MinIO Console** | [http://localhost:9001](http://localhost:9001) | Verificar arquivos `.parquet` e logs Delta. |
 | **Spark Master** | [http://localhost:8080](http://localhost:8080) | Acompanhar aplicações Spark "Running". |
-| **Spark Worker** | [http://localhost:8081](http://localhost:8081) | Verificar uso de CPU/RAM das tasks. |
 | **FastAPI Docs** | [http://localhost:8000/docs](http://localhost:8000/docs) | Testar a ingestão manualmente. |
+
+> **Credenciais Grafana:** Usuário `admin` / Senha `admin`. O dashboard **"Pipeline Data Quality & Performance"** já vem pré-configurado.
+
+---
+
+## 📈 Estratégia de Qualidade (Data Quality Score)
+
+O pipeline monitora quatro dimensões de qualidade em tempo real:
+1. **Validade**: Tickers e preços consistentes (Score 100 se não houver rejeições).
+2. **Completude**: Presença de metadados financeiros como `marketCap`.
+3. **Freshness (Frescor)**: Latência fim-a-fim abaixo de 120s (SLA Near Real-Time).
+4. **Integridade**: Sucesso de parsing do JSON bruto na camada Bronze.
+
+Essas métricas são consolidadas no **Data Quality Score (DQS)** global visível no Grafana.
 
 ---
 
@@ -310,7 +353,7 @@ Este projeto foi desenhado como um ambiente local reprodutível para TCC, não c
 - **Orquestração simplificada**: Docker Compose e scripts shell garantem reprodutibilidade local; em produção, um orquestrador como Airflow, Prefect ou Dagster seria mais adequado para retries, lineage e monitoramento.
 - **Fonte de dados limitada pelo provedor**: a arquitetura processa continuamente, mas a atualização das cotações depende do plano contratado na Brapi.
 - **Separação entre tempo operacional e tempo financeiro**: a Gold Operacional usa `ingestion_timestamp` para medir o pipeline, enquanto a Gold Financeira usa `event_timestamp` para análise de mercado.
-- **Observabilidade ativa limitada**: as métricas estão disponíveis por consultas SQL no Trino, mas ainda não há dashboard Prometheus/Grafana ou alertas automáticos.
+- **Ambiente Single-Node**: Desenhado para execução em uma única máquina (Docker), não escalado horizontalmente para clusters produtivos.
 
 Essas limitações devem ser apresentadas como decisões de escopo para manter o foco do TCC em arquitetura lakehouse, streaming e mensuração de latência.
 

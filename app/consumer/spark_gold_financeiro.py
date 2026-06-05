@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import time
 from minio import Minio
-from consumer.transformations import transform_silver_to_gold_financial
+from consumer.tratamento import transformar_silver_para_gold_financeiro
 from observability.logging_utils import configure_json_logging, log_event
 
 MINIO_ENDPOINT_URL = os.getenv("MINIO_ENDPOINT_URL", "minio:9000")
@@ -54,7 +54,7 @@ def main():
         .format("delta") \
         .load(SILVER_PATH)
 
-    df_gold = transform_silver_to_gold_financial(df_silver)
+    df_gold = transformar_silver_para_gold_financeiro(df_silver)
 
     query = df_gold.writeStream \
         .format("delta") \

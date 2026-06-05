@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from scheduler import create_scheduler
+from app.scheduler import create_scheduler
 
 
 def test_scheduler_runs_collection_immediately_on_start():
