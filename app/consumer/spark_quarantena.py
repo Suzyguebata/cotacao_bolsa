@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import time
 from minio import Minio
-from consumer.transformations import transform_bronze_to_quarantine
+from consumer.tratamento import transformar_bronze_para_quarantena
 from observability.logging_utils import configure_json_logging, log_event
 
 MINIO_ENDPOINT_URL = os.getenv("MINIO_ENDPOINT_URL", "minio:9000")
@@ -54,7 +54,7 @@ def main():
         .format("delta") \
         .load(BRONZE_PATH)
 
-    df_quarantine = transform_bronze_to_quarantine(df_bronze)
+    df_quarantine = transformar_bronze_para_quarantena(df_bronze)
 
     query = df_quarantine.writeStream \
         .format("delta") \

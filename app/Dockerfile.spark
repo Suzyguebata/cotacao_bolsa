@@ -16,7 +16,8 @@ WORKDIR /app
 COPY consumer/ /app/consumer/
 COPY observability/ /app/observability/
 
-# Garantir que o Spark use o diretório de cache correto
+# Garantir que o Spark use o diretório de cache correto e encontre o módulo app
 ENV IVY_PACKAGE_DIR=/home/spark/.ivy2/jars
+ENV PYTHONPATH=$PYTHONPATH:/app
 
 USER spark

@@ -9,4 +9,6 @@ COPY api/ /app/api/
 COPY observability/ /app/observability/
 COPY scheduler.py /app/scheduler.py
 
+ENV PYTHONPATH=/app
+
 CMD ["python", "-m", "uvicorn", "api.lambda_api:app", "--host", "0.0.0.0", "--port", "8000"]
