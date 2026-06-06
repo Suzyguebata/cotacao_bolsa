@@ -214,7 +214,7 @@ CALL delta.system.register_table(schema_name => 'bronze', table_name => 'cotacoe
 CALL delta.system.register_table(schema_name => 'silver', table_name => 'cotacoes', table_location => 's3a://datalake/silver/cotacoes');
 CALL delta.system.register_table(schema_name => 'silver', table_name => 'cotacoes_rejeitadas', table_location => 's3a://datalake/silver/cotacoes_rejeitadas');
 CALL delta.system.register_table(schema_name => 'gold', table_name => 'media_precos_ingestao_5min', table_location => 's3a://datalake/gold/media_precos_ingestao_5min');
-CALL delta.system.register_table(schema_name => 'gold', table_name => 'media_precos_evento_5min', table_location => 's3a://datalake/gold/media_precos_evento_5min');
+CALL delta.system.register_table(schema_name => 'gold', table_name => 'media_precos_atualizacao_5min', table_location => 's3a://datalake/gold/media_precos_atualizacao_5min');
 ```
 
 ---
@@ -225,11 +225,11 @@ A modelagem segue a arquitetura Medallion, separando rastreabilidade, qualidade 
 
 | Camada | Tabela Trino | Finalidade | Tempo principal |
 | :--- | :--- | :--- | :--- |
-| Bronze | `delta.bronze.cotacoes` | Preservar payload bruto, metadados Kafka e resultado do parsing. | `kafka_timestamp` / `ingestion_timestamp` |
-| Silver | `delta.silver.cotacoes` | Manter apenas cotações válidas, tipadas e deduplicadas. | `event_timestamp` |
-| Silver Rejeitados | `delta.silver.cotacoes_rejeitadas` | Auditar registros rejeitados pelas regras de qualidade. | `ingestion_timestamp` |
-| Gold Operacional | `delta.gold.media_precos_ingestao_5min` | Medir comportamento operacional do pipeline por janela de ingestão. | `ingestion_timestamp` |
-| Gold Financeira | `delta.gold.media_precos_evento_5min` | Analisar preços por janela do horário real da cotação. | `event_timestamp` |
+| Bronze | `delta.bronze.cotacoes` | Preservar payload bruto, metadados Kafka e resultado do parsing. | `data_hora_kafka` / `data_hora_ingestao` |
+| Silver | `delta.silver.cotacoes` | Manter apenas cotações válidas, tipadas e deduplicadas. | `data_hora_atualizacao` |
+| Silver Rejeitados | `delta.silver.cotacoes_rejeitadas` | Auditar registros rejeitados pelas regras de qualidade. | `data_hora_ingestao` |
+| Gold Operacional | `delta.gold.media_precos_ingestao_5min` | Medir comportamento operacional do pipeline por janela de ingestão. | `data_hora_ingestao` |
+| Gold Atualizacao Brapi | `delta.gold.media_precos_atualizacao_5min` | Analisar preços por janela do horário real da cotação. | `data_hora_atualizacao` |
 
 ### Bronze: `delta.bronze.cotacoes`
 
@@ -250,7 +250,7 @@ Principais colunas:
 - `price`: preço tipado como `double`.
 - `change`: variação de mercado.
 - `marketCap`: valor de mercado informado pela fonte.
-- `event_timestamp`: horário real da cotação, derivado de `regularMarketTime`.
+- `data_hora_atualizacao`: horário real da cotação na Brapi, derivado de `regularMarketTime`.
 - `date`: data de particionamento da Silver.
 - `kafka_timestamp` e `ingestion_timestamp`: timestamps usados para cálculo de latência.
 
@@ -260,7 +260,7 @@ Regras aplicadas:
 - remove preço nulo, zero ou negativo;
 - remove timestamp de evento inválido;
 - remove registros sem `ingestion_timestamp`;
-- deduplica por `ticker`, `event_timestamp` e `price`.
+- deduplica por `ticket_ativo_b3`, `data_hora_atualizacao` e `valor_atual`.
 
 ### Silver Rejeitados: `delta.silver.cotacoes_rejeitadas`
 
@@ -270,12 +270,12 @@ Principais colunas:
 
 - metadados Kafka e `json_value`, para auditoria;
 - campos brutos da cotação, quando disponíveis;
-- `event_timestamp` e `ingestion_timestamp`;
-- `rejection_reason`, com motivos como `parse_error`, `no_results`, `invalid_ticker`, `invalid_price`, `invalid_event_timestamp` e `invalid_ingestion_timestamp`.
+- `data_hora_atualizacao` e `data_hora_ingestao`;
+- `rejection_reason`, com motivos como `erro_parse`, `sem_resultado`, `ticket_invalido`, `valor_atual_invalido`, `data_hora_atualizacao_invalida` e `data_hora_ingestao_invalida`.
 
 ### Gold Operacional: `delta.gold.media_precos_ingestao_5min`
 
-Agrega a Silver por janelas de 5 minutos usando `ingestion_timestamp`.
+Agrega a Silver por janelas de 5 minutos usando `data_hora_ingestao`.
 
 Principais colunas:
 
@@ -283,14 +283,14 @@ Principais colunas:
 - `ticker`;
 - `avg_price`, `min_price`, `max_price`;
 - `sample_count`;
-- `window_basis = ingestion_timestamp`;
+- `periodo_base = data_hora_ingestao`;
 - `calculation_timestamp`.
 
 Uso principal: medir comportamento operacional do pipeline, volume por janela e latência de cálculo.
 
-### Gold Financeira: `delta.gold.media_precos_evento_5min`
+### Gold Atualizacao Brapi: `delta.gold.media_precos_atualizacao_5min`
 
-Agrega a Silver por janelas de 5 minutos usando `event_timestamp`.
+Agrega a Silver por janelas de 5 minutos usando `data_hora_atualizacao`.
 
 Principais colunas:
 
@@ -298,7 +298,7 @@ Principais colunas:
 - `ticker`;
 - `avg_price`, `min_price`, `max_price`;
 - `sample_count`;
-- `window_basis = event_timestamp`;
+- `periodo_base = data_hora_atualizacao`;
 - `calculation_timestamp`.
 
 Uso principal: análise temporal dos preços pelo horário real da cotação.
@@ -335,7 +335,7 @@ Plano adotado:
 
 1. **Desenvolvimento com Brapi Free**: manter o custo zero enquanto o pipeline, os testes e a documentação são estabilizados.
 2. **Coleta final com Brapi Pro**: contratar por um mês próximo da apresentação para coletar evidências com atraso aproximado de 5 minutos.
-3. **Duas Golds em janelas de 5 minutos**: separar a Gold Operacional, baseada em `ingestion_timestamp`, da Gold Financeira, baseada em `event_timestamp`. A primeira mede comportamento do pipeline por intervalo de ingestão; a segunda representa a análise temporal da cotação pelo horário real do evento. As escritas das Golds usam modo `complete` para materializar os agregados atuais durante a demonstração.
+3. **Duas Golds em janelas de 5 minutos**: separar a Gold Operacional, baseada em `data_hora_ingestao`, da Gold Atualizacao Brapi, baseada em `data_hora_atualizacao`. A primeira mede comportamento do pipeline por intervalo de ingestão; a segunda representa a análise temporal da cotação pelo horário real informado pela Brapi. As escritas das Golds usam modo `complete` para materializar os agregados atuais durante a demonstração.
 4. **Medição de latência fim a fim**: separar latência da fonte, latência de ingestão e latência de processamento entre Bronze, Silver e Gold.
 5. **Quarentena de dados rejeitados**: manter em `silver.cotacoes_rejeitadas` os registros que não atendem às regras de qualidade da Silver, com o motivo de rejeição.
 6. **Trabalho futuro com WebSocket/Cedro**: registrar a integração com Market Data via WebSocket como evolução para dados efetivamente em tempo real, sem colocar essa dependência no caminho crítico da entrega.
@@ -352,7 +352,7 @@ Este projeto foi desenhado como um ambiente local reprodutível para TCC, não c
 - **MinIO local**: simula armazenamento compatível com S3, mas não substitui políticas produtivas de backup, replicação e controle de acesso.
 - **Orquestração simplificada**: Docker Compose e scripts shell garantem reprodutibilidade local; em produção, um orquestrador como Airflow, Prefect ou Dagster seria mais adequado para retries, lineage e monitoramento.
 - **Fonte de dados limitada pelo provedor**: a arquitetura processa continuamente, mas a atualização das cotações depende do plano contratado na Brapi.
-- **Separação entre tempo operacional e tempo financeiro**: a Gold Operacional usa `ingestion_timestamp` para medir o pipeline, enquanto a Gold Financeira usa `event_timestamp` para análise de mercado.
+- **Separação entre tempo operacional e tempo financeiro**: a Gold Operacional usa `data_hora_ingestao` para medir o pipeline, enquanto a Gold Atualizacao Brapi usa `data_hora_atualizacao` para análise de mercado.
 - **Ambiente Single-Node**: Desenhado para execução em uma única máquina (Docker), não escalado horizontalmente para clusters produtivos.
 
 Essas limitações devem ser apresentadas como decisões de escopo para manter o foco do TCC em arquitetura lakehouse, streaming e mensuração de latência.
@@ -369,7 +369,7 @@ Antes da apresentação, recomenda-se executar uma coleta controlada e registrar
 4. **Volume por camada**: contagem de registros em Bronze, Silver e Gold usando `relatorio_tcc_metricas.sql`.
 5. **Qualidade de dados**: quantidade de registros válidos, inválidos filtrados e duplicidades removidas.
 6. **Quarentena**: contagem de rejeitados por `rejection_reason` em `delta.silver.cotacoes_rejeitadas`.
-7. **Latência por etapa**: diferença entre `event_timestamp`, `kafka_timestamp` e `ingestion_timestamp`.
+7. **Latência por etapa**: diferença entre `data_hora_atualizacao`, `data_hora_kafka` e `data_hora_ingestao`.
 8. **Throughput**: registros processados por minuto na camada Silver.
 9. **Particionamento**: distribuição física da Silver por `ticker` e `date`.
 10. **Agregados Gold**: médias, mínimos, máximos e amostras por janela de 5 minutos nas Golds operacional e financeira.

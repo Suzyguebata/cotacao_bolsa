@@ -16,7 +16,7 @@ MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY", "admin123")
 DATA_LAKE_BUCKET = os.getenv("DATA_LAKE_BUCKET", "datalake")
 
 SILVER_PATH = os.getenv("SILVER_PATH", f"s3a://{DATA_LAKE_BUCKET}/silver/cotacoes")
-GOLD_PATH = os.getenv("GOLD_FINANCIAL_PATH", f"s3a://{DATA_LAKE_BUCKET}/gold/media_precos_evento_5min")
+GOLD_PATH = os.getenv("GOLD_FINANCIAL_PATH", f"s3a://{DATA_LAKE_BUCKET}/gold/media_precos_atualizacao_5min")
 CHECKPOINT_GOLD = os.getenv("CHECKPOINT_GOLD_FINANCIAL", f"s3a://{DATA_LAKE_BUCKET}/checkpoints/gold_financeira_cotacoes")
 logger = configure_json_logging("spark-gold-financial")
 

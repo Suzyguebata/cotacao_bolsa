@@ -1,11 +1,10 @@
 -- ==============================================================================
--- RELATÓRIO DE MÉTRICAS E ANÁLISE - ARQUITETURA MEDALLION (TCC)
--- Este arquivo contém as queries validadas para extração de métricas do pipeline.
--- Executar no console do Trino (docker exec -it app-trino-1 trino)
+-- RELATORIO DE METRICAS E ANALISE - ARQUITETURA MEDALLION (TCC)
+-- Queries alinhadas ao schema atual gerado por consumer/tratamento.py.
+-- Executar no console do Trino: docker exec -it app-trino-1 trino
 -- ==============================================================================
 
--- 1. VISÃO GERAL DO DATA LAKE (VERIFICAÇÃO DE SAÚDE)
--- Retorna o total de registros processados em cada camada.
+-- 1. Visao geral do Data Lake.
 SELECT 'Bronze' as camada, count(*) as total FROM delta.bronze.cotacoes
 UNION ALL
 SELECT 'Silver' as camada, count(*) as total FROM delta.silver.cotacoes
@@ -14,47 +13,44 @@ SELECT 'Silver Rejeitados' as camada, count(*) as total FROM delta.silver.cotaco
 UNION ALL
 SELECT 'Gold Operacional' as camada, count(*) as total FROM delta.gold.media_precos_ingestao_5min
 UNION ALL
-SELECT 'Gold Financeira' as camada, count(*) as total FROM delta.gold.media_precos_evento_5min;
+SELECT 'Gold Atualizacao Brapi' as camada, count(*) as total FROM delta.gold.media_precos_atualizacao_5min;
 
--- 2. THROUGHPUT (VAZÃO) DE PROCESSAMENTO
--- Analisa quantos registros foram processados por minuto na camada Silver.
-SELECT 
-    date_trunc('minute', ingestion_timestamp) as minuto_processamento,
+-- 2. Throughput de processamento na Silver.
+SELECT
+    date_trunc('minute', data_hora_ingestao) as minuto_processamento,
     count(*) as total_registros,
     round(count(*) / 60.0, 2) as registros_por_segundo
 FROM delta.silver.cotacoes
 GROUP BY 1
 ORDER BY 1 DESC;
 
--- 3. ANÁLISE DE NEGÓCIO (ATIVOS FINANCEIROS)
--- Calcula métricas financeiras sobre os dados refinados da Silver.
+-- 3. Analise de negocio por ativo.
 SELECT
-    ticker,
+    ticket_ativo_b3,
     count(*) as num_amostras,
-    round(avg(price), 2) as preco_medio,
-    min(price) as preco_minimo,
-    max(price) as preco_maximo,
-    round(max(price) - min(price), 2) as volatilidade_janela
+    round(avg(valor_atual), 2) as preco_medio,
+    min(valor_atual) as preco_minimo,
+    max(valor_atual) as preco_maximo,
+    round(max(valor_atual) - min(valor_atual), 2) as volatilidade_janela
 FROM delta.silver.cotacoes
-GROUP BY ticker
+GROUP BY ticket_ativo_b3
 ORDER BY num_amostras DESC;
 
--- 4. QUALIDADE DOS DADOS NA CAMADA SILVER
--- Quantifica registros válidos e inválidos segundo as regras aplicadas na transformação Silver.
+-- 4. Qualidade dos dados na Bronze e Silver.
 SELECT
     count(*) as total_bronze,
     count_if(symbol IS NOT NULL AND trim(symbol) <> '') as com_ticker,
     count_if(regularMarketPrice IS NOT NULL AND regularMarketPrice > 0) as com_preco_valido,
     count_if(try(from_iso8601_timestamp(regularMarketTime)) IS NOT NULL) as com_timestamp_evento_valido,
-    count_if(ingestion_timestamp IS NOT NULL) as com_ingestao_valida
+    count_if(data_hora_ingestao IS NOT NULL) as com_ingestao_valida
 FROM delta.bronze.cotacoes;
 
 SELECT
     count(*) as total_silver_validos,
-    count_if(ticker IS NULL OR trim(ticker) = '') as tickers_invalidos_remanescentes,
-    count_if(price IS NULL OR price <= 0) as precos_invalidos_remanescentes,
-    count_if(event_timestamp IS NULL) as eventos_invalidos_remanescentes,
-    count_if(ingestion_timestamp IS NULL) as ingestoes_invalidas_remanescentes
+    count_if(ticket_ativo_b3 IS NULL OR trim(ticket_ativo_b3) = '') as tickers_invalidos_remanescentes,
+    count_if(valor_atual IS NULL OR valor_atual <= 0) as precos_invalidos_remanescentes,
+    count_if(data_hora_atualizacao IS NULL) as atualizacoes_invalidas_remanescentes,
+    count_if(data_hora_ingestao IS NULL) as ingestoes_invalidas_remanescentes
 FROM delta.silver.cotacoes;
 
 SELECT
@@ -65,9 +61,9 @@ GROUP BY rejection_reason
 ORDER BY total_rejeitados DESC;
 
 SELECT
-    symbol as ticker,
-    regularMarketTime,
-    regularMarketPrice,
+    symbol as ticket_ativo_b3,
+    regularMarketTime as data_hora_atualizacao,
+    regularMarketPrice as valor_atual,
     count(*) as ocorrencias_repetidas
 FROM delta.bronze.cotacoes
 WHERE symbol IS NOT NULL
@@ -77,119 +73,131 @@ GROUP BY symbol, regularMarketTime, regularMarketPrice
 HAVING count(*) > 1
 ORDER BY ocorrencias_repetidas DESC;
 
--- 5. LATÊNCIA E TEMPO DE OPERAÇÃO
--- Calcula a duração total do pipeline e a janela de tempo dos dados.
-SELECT 
-    min(ingestion_timestamp) as primeira_ingestao,
-    max(ingestion_timestamp) as ultima_ingestao,
-    date_diff('second', min(ingestion_timestamp), max(ingestion_timestamp)) as duracao_total_segundos,
-    date_diff('minute', min(ingestion_timestamp), max(ingestion_timestamp)) as duracao_total_minutos
+-- 5. Duracao total do pipeline pela janela de ingestao Silver.
+SELECT
+    min(data_hora_ingestao) as primeira_ingestao,
+    max(data_hora_ingestao) as ultima_ingestao,
+    date_diff('second', min(data_hora_ingestao), max(data_hora_ingestao)) as duracao_total_segundos,
+    date_diff('minute', min(data_hora_ingestao), max(data_hora_ingestao)) as duracao_total_minutos
 FROM delta.silver.cotacoes;
 
--- 6. LATÊNCIA FIM A FIM POR ETAPA
--- Separa a latência da fonte, da ingestão Kafka/Spark e o atraso total até a Silver.
--- event_timestamp vem da Brapi; kafka_timestamp vem do Kafka; ingestion_timestamp é a chegada na camada Silver.
+-- 6. Latencia fim a fim por etapa.
+-- data_hora_atualizacao vem da Brapi; data_hora_kafka vem do Kafka; data_hora_ingestao e a chegada na Bronze/Silver.
 SELECT
-    ticker,
+    ticket_ativo_b3,
     count(*) as total_amostras,
-    round(avg(date_diff('second', event_timestamp, kafka_timestamp)), 2) as media_fonte_para_kafka_segundos,
-    round(avg(date_diff('second', kafka_timestamp, ingestion_timestamp)), 2) as media_kafka_para_silver_segundos,
-    round(avg(date_diff('second', event_timestamp, ingestion_timestamp)), 2) as media_fonte_para_silver_segundos,
-    min(date_diff('second', event_timestamp, ingestion_timestamp)) as menor_latencia_total_segundos,
-    max(date_diff('second', event_timestamp, ingestion_timestamp)) as maior_latencia_total_segundos
+    round(avg(date_diff('second', data_hora_atualizacao, data_hora_kafka)), 2) as media_fonte_para_kafka_segundos,
+    round(avg(date_diff('second', data_hora_kafka, data_hora_ingestao)), 2) as media_kafka_para_silver_segundos,
+    round(avg(date_diff('second', data_hora_atualizacao, data_hora_ingestao)), 2) as media_fonte_para_silver_segundos,
+    min(date_diff('second', data_hora_atualizacao, data_hora_ingestao)) as menor_latencia_total_segundos,
+    max(date_diff('second', data_hora_atualizacao, data_hora_ingestao)) as maior_latencia_total_segundos
 FROM delta.silver.cotacoes
-WHERE event_timestamp IS NOT NULL
-  AND kafka_timestamp IS NOT NULL
-  AND ingestion_timestamp IS NOT NULL
-GROUP BY ticker
+WHERE data_hora_atualizacao IS NOT NULL
+  AND data_hora_kafka IS NOT NULL
+  AND data_hora_ingestao IS NOT NULL
+GROUP BY ticket_ativo_b3
 ORDER BY media_fonte_para_silver_segundos DESC;
 
--- 7. AMOSTRAS RECENTES DE LATÊNCIA
--- Ajuda a explicar casos extremos durante a apresentação.
+-- 7. Amostras recentes de latencia.
 SELECT
-    ticker,
-    event_timestamp,
-    kafka_timestamp,
-    ingestion_timestamp,
-    date_diff('second', event_timestamp, kafka_timestamp) as fonte_para_kafka_segundos,
-    date_diff('second', kafka_timestamp, ingestion_timestamp) as kafka_para_silver_segundos,
-    date_diff('second', event_timestamp, ingestion_timestamp) as fonte_para_silver_segundos
+    ticket_ativo_b3,
+    data_hora_atualizacao,
+    data_hora_kafka,
+    data_hora_ingestao,
+    date_diff('second', data_hora_atualizacao, data_hora_kafka) as fonte_para_kafka_segundos,
+    date_diff('second', data_hora_kafka, data_hora_ingestao) as kafka_para_silver_segundos,
+    date_diff('second', data_hora_atualizacao, data_hora_ingestao) as fonte_para_silver_segundos
 FROM delta.silver.cotacoes
-WHERE event_timestamp IS NOT NULL
-ORDER BY ingestion_timestamp DESC
+WHERE data_hora_atualizacao IS NOT NULL
+  AND data_hora_kafka IS NOT NULL
+  AND data_hora_ingestao IS NOT NULL
+ORDER BY data_hora_ingestao DESC
 LIMIT 20;
 
--- 8. VERIFICAÇÃO DE PARTICIONAMENTO
--- Demonstra como o Delta Lake organiza os dados fisicamente por ticker e data.
-SELECT ticker, "date", count(*) as registros_na_particao
+-- 8. Verificacao de particionamento fisico da Silver.
+SELECT ticket_ativo_b3, "data", count(*) as registros_na_particao
 FROM delta.silver.cotacoes
-GROUP BY ticker, "date"
-ORDER BY ticker, "date";
+GROUP BY ticket_ativo_b3, "data"
+ORDER BY ticket_ativo_b3, "data";
 
--- 9. AGREGADOS GOLD OPERACIONAL (JANELA DE INGESTÃO 5 MIN)
--- Consulta a camada de agregação operacional baseada em ingestion_timestamp.
-SELECT 
-    window_start,
-    window_end,
-    window_basis,
-    ticker,
-    avg_price,
-    sample_count,
-    calculation_timestamp,
-    date_diff('second', window_end, calculation_timestamp) as latencia_calculo_gold_segundos
+-- 9. Agregados Gold Operacional, janela de ingestao de 5 minutos.
+SELECT
+    inicio_periodo,
+    fim_periodo,
+    periodo_base,
+    ticket_ativo_b3,
+    preco_medio_periodo,
+    preco_minimo_periodo,
+    preco_maximo_periodo,
+    quantidade_amostras,
+    data_hora_processamento,
+    date_diff('second', fim_periodo, data_hora_processamento) as latencia_calculo_gold_segundos
 FROM delta.gold.media_precos_ingestao_5min
-ORDER BY window_start DESC;
+ORDER BY inicio_periodo DESC;
 
--- 11. PERCENTIS DE LATÊNCIA POR TICKER (P50, P95, P99)
--- Demonstra a distribuição do atraso entre evento e ingestão final.
-SELECT ticker,
-   approx_percentile(date_diff('second', event_timestamp, ingestion_timestamp), 0.5) AS p50,
-   approx_percentile(date_diff('second', event_timestamp, ingestion_timestamp), 0.95) AS p95,
-   approx_percentile(date_diff('second', event_timestamp, ingestion_timestamp), 0.99) AS p99,
-   count(*) AS total
- FROM delta.silver.cotacoes
- WHERE event_timestamp IS NOT NULL AND ingestion_timestamp IS NOT NULL
- GROUP BY ticker
- ORDER BY p95 DESC;
+-- 10. Agregados Gold Atualizacao Brapi, janela por horario real da cotacao.
+SELECT
+    inicio_periodo,
+    fim_periodo,
+    periodo_base,
+    ticket_ativo_b3,
+    preco_medio_periodo,
+    preco_minimo_periodo,
+    preco_maximo_periodo,
+    quantidade_amostras,
+    data_hora_processamento
+FROM delta.gold.media_precos_atualizacao_5min
+ORDER BY inicio_periodo DESC;
 
--- 12. ANÁLISE DE LATE ARRIVALS (THRESHOLD 300S)
--- Quantifica dados que chegaram com mais de 5 minutos de atraso em relação ao mercado.
-SELECT ticker, 
-       count(*) AS late_count, 
-       round(100.0 * count(*) / sum(count(*)) OVER (), 2) AS pct_late
- FROM delta.silver.cotacoes
- WHERE date_diff('second', event_timestamp, ingestion_timestamp) > 300
- GROUP BY ticker 
- ORDER BY late_count DESC;
+-- 11. Percentis de latencia por ticker.
+SELECT
+    ticket_ativo_b3,
+    approx_percentile(date_diff('second', data_hora_atualizacao, data_hora_ingestao), 0.5) AS p50,
+    approx_percentile(date_diff('second', data_hora_atualizacao, data_hora_ingestao), 0.95) AS p95,
+    approx_percentile(date_diff('second', data_hora_atualizacao, data_hora_ingestao), 0.99) AS p99,
+    count(*) AS total
+FROM delta.silver.cotacoes
+WHERE data_hora_atualizacao IS NOT NULL
+  AND data_hora_ingestao IS NOT NULL
+GROUP BY ticket_ativo_b3
+ORDER BY p95 DESC;
 
--- 14. DATA QUALITY SCORE (DQS) POR TICKER
--- Consolida as dimensões de qualidade em um score de 0 a 100.
--- Dimensões: Sucesso de Parsing, Completude (preço/ticker) e Integridade de Tempo.
+-- 12. Late arrivals acima de 300 segundos.
+SELECT
+    ticket_ativo_b3,
+    count(*) AS late_count,
+    round(100.0 * count(*) / sum(count(*)) OVER (), 2) AS pct_late
+FROM delta.silver.cotacoes
+WHERE date_diff('second', data_hora_atualizacao, data_hora_ingestao) > 300
+GROUP BY ticket_ativo_b3
+ORDER BY late_count DESC;
+
+-- 13. Data Quality Score por ticker.
 WITH metrics AS (
-    SELECT 
-        ticker,
+    SELECT
+        ticket_ativo_b3,
         count(*) as total_processado,
-        -- Validade: Ticker e Preço presentes e corretos
-        count_if(ticker IS NOT NULL AND price > 0) as registros_validos,
-        -- Completude: MarketCap (que costuma falhar) presente
-        count_if(marketCap IS NOT NULL AND marketCap > 0) as com_marketcap,
-        -- Freshness: Latência menor que 2 minutos (Near Real Time)
-        count_if(date_diff('second', event_timestamp, ingestion_timestamp) < 120) as dentro_sla_latencia,
-        -- Integridade: Mudança de preço não nula
-        count_if(change IS NOT NULL) as com_change
+        count_if(ticket_ativo_b3 IS NOT NULL AND valor_atual > 0) as registros_validos,
+        count_if(valor_mercado_total IS NOT NULL AND valor_mercado_total > 0) as com_marketcap,
+        count_if(date_diff('second', data_hora_atualizacao, data_hora_ingestao) < 600) as dentro_sla_latencia,
+        count_if(variacao_valor_dia_anterior IS NOT NULL) as com_variacao
     FROM delta.silver.cotacoes
-    GROUP BY ticker
+    GROUP BY ticket_ativo_b3
 )
-SELECT 
-    ticker,
+SELECT
+    ticket_ativo_b3,
     total_processado,
     round(100.0 * registros_validos / total_processado, 2) as validade_score,
     round(100.0 * com_marketcap / total_processado, 2) as completude_score,
     round(100.0 * dentro_sla_latencia / total_processado, 2) as freshness_score,
+    round(100.0 * com_variacao / total_processado, 2) as variacao_score,
     round(
-        ( (1.0 * registros_validos / total_processado) + 
-          (1.0 * com_marketcap / total_processado) + 
-          (1.0 * dentro_sla_latencia / total_processado) ) / 3.0 * 100, 2
+        (
+            (1.0 * registros_validos / total_processado) +
+            (1.0 * com_marketcap / total_processado) +
+            (1.0 * dentro_sla_latencia / total_processado)
+        ) / 3.0 * 100,
+        2
     ) as global_quality_score
 FROM metrics
 ORDER BY global_quality_score DESC;

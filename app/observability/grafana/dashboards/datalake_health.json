@@ -31,7 +31,7 @@
         {
           "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
           "queryType": "query",
-          "rawSQL": "SELECT current_timestamp as time, round(((1.0 * count_if(ticket_ativo_b3 IS NOT NULL AND valor_atual > 0) / count(*)) + (1.0 * count_if(valor_mercado_total IS NOT NULL AND valor_mercado_total > 0) / count(*)) + (1.0 * count_if(date_diff('second', data_hora_evento, data_hora_ingestao) < 600) / count(*))) / 3.0 * 100, 2) as dqs_global FROM delta.silver.cotacoes",
+          "rawSQL": "SELECT current_timestamp as time, round(((1.0 * count_if(ticket_ativo_b3 IS NOT NULL AND valor_atual > 0) / count(*)) + (1.0 * count_if(valor_mercado_total IS NOT NULL AND valor_mercado_total > 0) / count(*)) + (1.0 * count_if(date_diff('second', data_hora_atualizacao, data_hora_ingestao) < 600) / count(*))) / 3.0 * 100, 2) as dqs_global FROM delta.silver.cotacoes",
           "refId": "A"
         }
       ],
@@ -100,7 +100,7 @@
         {
           "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
           "queryType": "query",
-          "rawSQL": "SELECT current_timestamp as time, round(100.0 * count_if(date_diff('second', data_hora_evento, data_hora_ingestao) < 600) / count(*), 2) as freshness FROM delta.silver.cotacoes",
+          "rawSQL": "SELECT current_timestamp as time, round(100.0 * count_if(date_diff('second', data_hora_atualizacao, data_hora_ingestao) < 600) / count(*), 2) as freshness FROM delta.silver.cotacoes",
           "refId": "A"
         }
       ],
@@ -134,7 +134,7 @@
         {
           "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
           "queryType": "query",
-          "rawSQL": "SELECT date_trunc('minute', data_hora_ingestao) as time, ticket_ativo_b3, avg(date_diff('second', data_hora_evento, data_hora_ingestao)) as latencia_media FROM delta.silver.cotacoes GROUP BY 1, 2 ORDER BY 1 ASC",
+          "rawSQL": "SELECT date_trunc('minute', data_hora_ingestao) as time, ticket_ativo_b3, avg(date_diff('second', data_hora_atualizacao, data_hora_ingestao)) as latencia_media FROM delta.silver.cotacoes GROUP BY 1, 2 ORDER BY 1 ASC",
           "refId": "A"
         }
       ],

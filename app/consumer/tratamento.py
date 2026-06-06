@@ -97,12 +97,12 @@ def transformar_kafka_para_bronze(df_kafka):
 
 def transformar_bronze_para_silver(df_bronze, watermark_duration="15 minutes"):
     df_prepared = df_bronze.withColumn(
-        "data_hora_evento",
+        "data_hora_atualizacao",
         to_timestamp(col("regularMarketTime"))
     ).withColumn(
         "data",
-        date_format(col("data_hora_evento"), "yyyy-MM-dd")
-    ).withWatermark("data_hora_evento", watermark_duration)
+        date_format(col("data_hora_atualizacao"), "yyyy-MM-dd")
+    ).withWatermark("data_hora_atualizacao", watermark_duration)
 
     return df_prepared.select(
         "data_hora_kafka",
@@ -116,7 +116,7 @@ def transformar_bronze_para_silver(df_bronze, watermark_duration="15 minutes"):
         col("regularMarketDayRange").alias("faixa_valor_diario"),
         col("regularMarketChange").cast("double").alias("variacao_valor_dia_anterior"),
         col("regularMarketChangePercent").cast("double").alias("variacao_percentual_valor_dia"),
-        col("regularMarketTime").cast("timestamp").alias("data_hora_atualizacao"),
+        "data_hora_atualizacao",
         col("marketCap").cast("double").alias("valor_mercado_total"),
         col("regularMarketVolume").cast("long").alias("volume_negocios"),
         col("regularMarketPreviousClose").cast("double").alias("valor_fechamento_anterior"),
@@ -127,7 +127,6 @@ def transformar_bronze_para_silver(df_bronze, watermark_duration="15 minutes"):
         col("priceEarnings").cast("double").alias("indicador_lucro"),
         col("earningsPerShare").cast("double").alias("lucro_por_acao"),
         col("logourl").alias("url_logo_do_ativo"),
-        "data_hora_evento",  
         "data",
         "data_hora_ingestao"
     ).filter(
@@ -135,10 +134,10 @@ def transformar_bronze_para_silver(df_bronze, watermark_duration="15 minutes"):
         & (length(trim(col("ticket_ativo_b3"))) > 0)
         & col("valor_atual").isNotNull()
         & (col("valor_atual") > 0)
-        & col("data_hora_evento").isNotNull()
+        & col("data_hora_atualizacao").isNotNull()
         & col("data_hora_ingestao").isNotNull()
     ).dropDuplicates(
-        ["ticket_ativo_b3", "data_hora_evento", "valor_atual"]
+        ["ticket_ativo_b3", "data_hora_atualizacao", "valor_atual"]
     )
 
 
@@ -146,7 +145,7 @@ def transformar_bronze_para_quarantena(df_bronze):
     status_parse_bronze = _optional_column(df_bronze, "status_parse_bronze", "string")
 
     df_preparaco = df_bronze.withColumn(
-        "data_hora_evento",
+        "data_hora_atualizacao",
         to_timestamp(col("regularMarketTime"))
     ).withColumn(
         "valor_atual",
@@ -164,7 +163,7 @@ def transformar_bronze_para_quarantena(df_bronze):
             when(status_parse_bronze == "sem_resultado", lit("sem_resultado")),
             when(col("ticket_ativo_b3").isNull() | (length(trim(col("ticket_ativo_b3"))) == 0), lit("ticket_invalido")),
             when(col("valor_atual").isNull() | (col("valor_atual") <= 0), lit("valor_atual_invalido")),
-            when(col("data_hora_evento").isNull(), lit("data_hora_evento_invalida")),
+            when(col("data_hora_atualizacao").isNull(), lit("data_hora_atualizacao_invalida")),
             when(col("data_hora_ingestao").isNull(), lit("data_hora_ingestao_invalida"))
         )
     ).filter(
@@ -182,7 +181,7 @@ def transformar_bronze_para_quarantena(df_bronze):
         "regularMarketTime",
         "regularMarketChange",
         "marketCap",
-        "data_hora_evento",
+        "data_hora_atualizacao",
         "data_hora_ingestao",
         "rejection_reason"
     )
@@ -215,9 +214,9 @@ def transformar_silver_para_gold_operacional(df_silver, window_duration="5 minut
 
 def transformar_silver_para_gold_financeiro(df_silver, window_duration="5 minutes", watermark_duration="10 minutes"):
     """Agrega preços por períodos baseados no tempo do evento para análise financeira."""
-    return df_silver.withWatermark("data_hora_evento", watermark_duration) \
+    return df_silver.withWatermark("data_hora_atualizacao", watermark_duration) \
         .groupBy(
-            window(col("data_hora_evento"), window_duration),
+            window(col("data_hora_atualizacao"), window_duration),
             col("ticket_ativo_b3")
         ).agg(
             avg("valor_atual").alias("preco_medio_periodo"),
@@ -234,7 +233,7 @@ def transformar_silver_para_gold_financeiro(df_silver, window_duration="5 minute
             "quantidade_amostras"
         ).withColumn(
             "periodo_base",
-            lit("data_hora_evento")
+            lit("data_hora_atualizacao")
         ).withColumn("data_hora_processamento", current_timestamp())
 
 

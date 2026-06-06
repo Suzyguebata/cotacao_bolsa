@@ -171,7 +171,7 @@ def test_silver_transformation_logic(spark):
     assert result["valor_atual"] == 35.5
     assert result["variacao_valor_dia_anterior"] == 0.5
     assert result["valor_mercado_total"] == 1000000.0
-    assert isinstance(result["data_hora_evento"], datetime.datetime)
+    assert isinstance(result["data_hora_atualizacao"], datetime.datetime)
     assert result["data"] == "2023-10-27"
 
 
@@ -244,7 +244,7 @@ def test_silver_deduplicates_same_quote(spark):
     df_bronze = spark.createDataFrame(bronze_data, get_full_bronze_schema())
 
     rows = transformar_bronze_para_silver(df_bronze).collect()
-    keys = {(row["ticket_ativo_b3"], row["data_hora_evento"], row["valor_atual"]) for row in rows}
+    keys = {(row["ticket_ativo_b3"], row["data_hora_atualizacao"], row["valor_atual"]) for row in rows}
 
     assert len(rows) == 3
     assert len(keys) == 3
@@ -275,15 +275,15 @@ def test_gold_transformation_logic(spark):
     assert results["VALE3"]["quantidade_amostras"] == 1
 
 
-def test_financial_gold_uses_event_time_windows(spark):
-    event_time = datetime.datetime(2023, 10, 27, 10, 2, 0)
+def test_financial_gold_uses_update_time_windows(spark):
+    update_time = datetime.datetime(2023, 10, 27, 10, 2, 0)
     silver_data = [
-        (event_time, datetime.datetime(2023, 10, 27, 10, 7, 0), "PETR4", 35.0),
-        (event_time + datetime.timedelta(minutes=1), datetime.datetime(2023, 10, 27, 10, 8, 0), "PETR4", 37.0),
-        (event_time, datetime.datetime(2023, 10, 27, 10, 7, 0), "VALE3", 70.0),
+        (update_time, datetime.datetime(2023, 10, 27, 10, 7, 0), "PETR4", 35.0),
+        (update_time + datetime.timedelta(minutes=1), datetime.datetime(2023, 10, 27, 10, 8, 0), "PETR4", 37.0),
+        (update_time, datetime.datetime(2023, 10, 27, 10, 7, 0), "VALE3", 70.0),
     ]
     schema_silver = StructType([
-        StructField("data_hora_evento", TimestampType(), True),
+        StructField("data_hora_atualizacao", TimestampType(), True),
         StructField("data_hora_ingestao", TimestampType(), True),
         StructField("ticket_ativo_b3", StringType(), True),
         StructField("valor_atual", DoubleType(), True),
@@ -295,6 +295,6 @@ def test_financial_gold_uses_event_time_windows(spark):
 
     assert results["PETR4"]["preco_medio_periodo"] == 36.0
     assert results["PETR4"]["quantidade_amostras"] == 2
-    assert results["PETR4"]["periodo_base"] == "data_hora_evento"
+    assert results["PETR4"]["periodo_base"] == "data_hora_atualizacao"
     assert results["PETR4"]["inicio_periodo"] == datetime.datetime(2023, 10, 27, 10, 0, 0)
     assert results["VALE3"]["quantidade_amostras"] == 1
