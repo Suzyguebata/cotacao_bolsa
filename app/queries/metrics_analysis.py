@@ -2,19 +2,102 @@
 # Para simplificar o TCC, vamos focar no cálculo via SQL que pode ser feito no Trino
 
 QUERIES = {
-    "latencia_total": """
+    "qualidade_bronze": """
+        SELECT
+            count(*) as total_bronze,
+            count_if(symbol IS NOT NULL AND trim(symbol) <> '') as com_ticker,
+            count_if(regularMarketPrice IS NOT NULL AND regularMarketPrice > 0) as com_preco_valido,
+            count_if(try(from_iso8601_timestamp(regularMarketTime)) IS NOT NULL) as com_data_hora_evento_valido,
+            count_if(ingestion_timestamp IS NOT NULL) as com_ingestao_valida
+        FROM delta.bronze.cotacoes;
+    """,
+    "qualidade_silver": """
+        SELECT
+            count(*) as total_silver_validos,
+            count_if(ticket_ativo_b3 IS NULL OR trim(ticket_ativo_b3) = '') as tickers_invalidos_remanescentes,
+            count_if(valor_atual IS NULL OR valor_atual <= 0) as precos_invalidos_remanescentes,
+            count_if(data_hora_evento IS NULL) as eventos_invalidos_remanescentes,
+            count_if(data_hora_ingestao IS NULL) as ingestoes_invalidas_remanescentes
+        FROM delta.silver.cotacoes;
+    """,
+    "rejeicoes_silver": """
+        SELECT
+            rejection_reason,
+            count(*) as total_rejeitados
+        FROM delta.silver.cotacoes_rejeitadas
+        GROUP BY rejection_reason
+        ORDER BY total_rejeitados DESC;
+    """,
+    "duplicidades_bronze": """
+        SELECT
+            ticket_ativo_b3,
+            data_hora_atualizacao,
+            valor_atual
+            count(*) as ocorrencias_repetidas
+        FROM delta.bronze.cotacoes
+        WHERE ticket_ativo_b3 IS NOT NULL
+          AND data_hora_atualizacao IS NOT NULL
+          AND valor_atual IS NOT NULL
+        GROUP BY ticket_ativo_b3, data_hora_atualizacao, valor_atual
+        HAVING count(*) > 1
+        ORDER BY ocorrencias_repetidas DESC;
+    """,
+    "latencia_por_etapa_silver": """
+        SELECT
+            ticket_ativo_b3,
+            count(*) as total_amostras,
+            round(avg(date_diff('second', event_timestamp, kafka_timestamp)), 2) as media_fonte_para_kafka_segundos,
+            round(avg(date_diff('second', kafka_timestamp, ingestion_timestamp)), 2) as media_kafka_para_silver_segundos,
+            round(avg(date_diff('second', event_timestamp, ingestion_timestamp)), 2) as media_fonte_para_silver_segundos
+        FROM delta.silver.cotacoes
+        WHERE data_hora_evento IS NOT NULL
+          AND data_hora_kafka IS NOT NULL
+          AND data_hora_ingestao IS NOT NULL
+        GROUP BY ticket_ativo_b3
+        ORDER BY media_fonte_para_silver_segundos DESC;
+    """,
+    "amostras_recentes_latencia": """
+        SELECT
+            ticket_ativo_b3,
+            data_hora_evento,
+            data_hora_kafka,
+            data_hora_ingestao,
+            date_diff('second', data_hora_evento, data_hora_kafka) as fonte_para_kafka_segundos,
+            date_diff('second', data_hora_kafka, data_hora_ingestao) as kafka_para_silver_segundos,
+            date_diff('second', data_hora_evento, data_hora_ingestao) as fonte_para_silver_segundos
+        FROM delta.silver.cotacoes
+        WHERE data_hora_evento IS NOT NULL
+        ORDER BY data_hora_ingestao DESC
+        LIMIT 20;
+    """,
+    "latencia_operacional_gold": """
         SELECT 
-            ticker,
-            window_end,
-            calculation_timestamp,
-            date_diff('second', window_end, calculation_timestamp) as latencia_segundos
-        FROM delta.gold.media_precos_5min
+            ticket_ativo_b3,
+            fim_periodo,
+            periodo_base,
+            data_hora_processamento,
+            date_diff('second', fim_periodo, data_hora_processamento) as latencia_calculo_gold_segundos
+        FROM delta.gold.media_precos_ingestao_5min
         ORDER BY window_end DESC
+        LIMIT 10;
+    """,
+    "agregados_financeiros_gold": """
+        SELECT
+            ticket_ativo_b3,
+            inicio_periodo,
+            fim_periodo,
+            periodo_base,
+            preco_medio_periodo,
+            preco_minimo_periodo,
+            preco_maximo_periodo,
+            quantidade_amostras
+        FROM delta.gold.media_precos_evento_5min
+        ORDER BY window_start DESC
         LIMIT 10;
     """,
     "throughput_silver": """
         SELECT 
-            date_trunc('minute', ingestion_timestamp) as minuto,
+            date_trunc('minute', data_hora_ingestao) as minuto,
             count(*) as total_registros,
             count(*) / 60.0 as registros_por_segundo
         FROM delta.silver.cotacoes

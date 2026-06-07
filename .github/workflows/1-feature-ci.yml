@@ -1,0 +1,70 @@
+name: Feature CI
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - "feature/**"
+  pull_request:
+    branches:
+      - develop
+
+jobs:
+  tests:
+    name: Spark and API checks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || startsWith(github.head_ref, 'feature/')
+
+    defaults:
+      run:
+        working-directory: app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Spark image
+        run: docker compose build spark-bronze
+
+      - name: Run Spark transformation tests with coverage (persist results)
+        run: |
+          CONTAINER_NAME=spark-test
+          docker compose run --no-deps --user root --name $CONTAINER_NAME spark-bronze /usr/bin/python3 -m pytest /app/tests/test_spark_logic.py --cov=app --cov-report=xml:/app/coverage-spark.xml || true
+          if docker ps -a --format '{{.Names}}' | grep -q "^$CONTAINER_NAME$"; then
+            docker cp "$CONTAINER_NAME":/app/coverage-spark.xml "$GITHUB_WORKSPACE/coverage-spark.xml" || true
+            docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+          fi
+
+      - name: Build API image
+        run: docker compose build api
+
+      - name: Run API validation tests with coverage (persist results)
+        run: |
+          CONTAINER_NAME=api-test
+          docker compose run --no-deps --name $CONTAINER_NAME api python -m pytest /app/tests/test_api_validation.py /app/tests/test_scheduler.py --cov=app --cov-report=xml:/app/coverage-api.xml || true
+          if docker ps -a --format '{{.Names}}' | grep -q "^$CONTAINER_NAME$"; then
+            docker cp "$CONTAINER_NAME":/app/coverage-api.xml "$GITHUB_WORKSPACE/coverage-api.xml" || true
+            docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+          fi
+
+      - name: Check API and scheduler syntax
+        run: docker compose run --rm --no-deps api python -m py_compile /app/api/lambda_api.py /app/scheduler.py
+
+      - name: Sonar scan on runner (if SONAR_TOKEN set)
+        if: secrets.SONAR_TOKEN != ''
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          echo "SONAR_TOKEN present; attempting Sonar scan on runner using dockerized sonar-scanner."
+          if [ -f "$GITHUB_WORKSPACE/sonar-project.properties" ]; then
+            docker run --rm -e SONAR_TOKEN="$SONAR_TOKEN" -v "$GITHUB_WORKSPACE:/usr/src" sonarsource/sonar-scanner-cli -Dsonar.login=$SONAR_TOKEN || true
+          else
+            echo "No sonar-project.properties found at repo root; skipping Sonar scan."
+          fi
+
+      - name: Clean Docker Compose resources
+        if: always()
+        run: docker compose down -v --remove-orphans

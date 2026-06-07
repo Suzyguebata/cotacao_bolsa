@@ -1,0 +1,59 @@
+name: Auto PR Develop to Main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  workflow_run:
+    workflows:
+      - Release CI
+    types:
+      - completed
+  push:
+    branches:
+      - develop
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  create-pr:
+    name: Create PR develop → main
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure main is fetched
+        run: git fetch origin main:refs/remotes/origin/main --depth=1
+
+      - name: Create pull request to main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH_NAME: develop
+        run: |
+          # if develop has no commits ahead of main, skip
+          if [ -z "$(git log --oneline origin/main..HEAD)" ]; then
+            echo "develop has no commits ahead of main. Skipping PR creation."
+            exit 0
+          fi
+
+          # skip if open PR already exists
+          if gh pr list --head "$BRANCH_NAME" --base main --state open --json number --jq '.[0].number' | grep -q '[0-9]'; then
+            echo "An open PR from $BRANCH_NAME to main already exists."
+            exit 0
+          fi
+
+          # create PR (requires workflows to have write permission)
+          gh pr create \
+            --base main \
+            --head "$BRANCH_NAME" \
+            --title "Release: develop → main" \
+            --body "PR criado automaticamente de develop para main pelo workflow." || {
+              echo "GitHub Actions is not permitted to create pull requests in this repository."
+              echo "Enable write permissions in Settings > Actions > General > Workflow permissions, or create the PR manually."
+              exit 0
+            }

@@ -1,0 +1,152 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 80 },
+              { "color": "green", "value": 95 }
+            ]
+          },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 0 },
+      "id": 1,
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "values": true, "fields": "/^dqs_global$/" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+          "queryType": "query",
+          "rawSQL": "SELECT current_timestamp as time, round(((1.0 * count_if(ticket_ativo_b3 IS NOT NULL AND valor_atual > 0) / count(*)) + (1.0 * count_if(valor_mercado_total IS NOT NULL AND valor_mercado_total > 0) / count(*)) + (1.0 * count_if(date_diff('second', data_hora_evento, data_hora_ingestao) < 600) / count(*))) / 3.0 * 100, 2) as dqs_global FROM delta.silver.cotacoes",
+          "refId": "A"
+        }
+      ],
+      "title": "Data Quality Score GLOBAL",
+      "type": "gauge"
+    },
+    {
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 98 }] },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 6 },
+      "id": 10,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": true, "fields": "/^validade$/" } },
+      "targets": [
+        {
+          "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+          "queryType": "query",
+          "rawSQL": "SELECT current_timestamp as time, round(100.0 * count_if(ticket_ativo_b3 IS NOT NULL AND valor_atual > 0) / count(*), 2) as validade FROM delta.silver.cotacoes",
+          "refId": "A"
+        }
+      ],
+      "title": "Dimensão: VALIDADE (Dados íntegros)",
+      "type": "gauge"
+    },
+    {
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 90 }] },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 6 },
+      "id": 11,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": true, "fields": "/^completude$/" } },
+      "targets": [
+        {
+          "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+          "queryType": "query",
+          "rawSQL": "SELECT current_timestamp as time, round(100.0 * count_if(valor_mercado_total IS NOT NULL AND valor_mercado_total > 0) / count(*), 2) as completude FROM delta.silver.cotacoes",
+          "refId": "A"
+        }
+      ],
+      "title": "Dimensão: COMPLETUDE (Metadados preenchidos)",
+      "type": "gauge"
+    },
+    {
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 85 }] },
+          "unit": "percent"
+        }
+      },
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 6 },
+      "id": 12,
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "values": true, "fields": "/^freshness$/" } },
+      "targets": [
+        {
+          "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+          "queryType": "query",
+          "rawSQL": "SELECT current_timestamp as time, round(100.0 * count_if(date_diff('second', data_hora_evento, data_hora_ingestao) < 600) / count(*), 2) as freshness FROM delta.silver.cotacoes",
+          "refId": "A"
+        }
+      ],
+      "title": "Dimensão: FRESHNESS (Tempestividade)",
+      "type": "gauge"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "reqps" } },
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 10 },
+      "id": 2,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "rate(http_requests_total[1m])",
+          "legendFormat": "{{handler}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Infraestrutura: Taxa de Ingestão (API Requests/sec)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "s" } },
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 17 },
+      "id": 3,
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        {
+          "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
+          "queryType": "query",
+          "rawSQL": "SELECT date_trunc('minute', data_hora_ingestao) as time, ticket_ativo_b3, avg(date_diff('second', data_hora_evento, data_hora_ingestao)) as latencia_media FROM delta.silver.cotacoes GROUP BY 1, 2 ORDER BY 1 ASC",
+          "refId": "A"
+        }
+      ],
+      "title": "Performance: Latência Real-Time por Ticker (Evento -> Silver)",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "1m",
+  "schemaVersion": 38,
+  "style": "dark",
+  "time": { "from": "now-24h", "to": "now" },
+  "title": "[TCC] Data Quality & Performance",
+  "uid": "tcc_datalake",
+  "version": 1
+}

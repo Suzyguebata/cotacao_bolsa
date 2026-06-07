@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Pipeline B3 - Suzana Alves</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+        mermaid.initialize({ startOnLoad: true, theme: 'neutral' });
+    </script>
+</head>
+<body>
+
+    <header>
+        <div class="logo-container">
+            <img src="assets/logo.svg" alt="Logo Data Pipeline">
+            <span class="author-name">Suzana Alves</span>
+        </div>
+        <nav>
+            <a href="#monitoramento" style="text-decoration: none; color: var(--primary-lilac); font-weight: 700;">Monitoramento</a>
+        </nav>
+    </header>
+
+    <div class="hero">
+        <h1>Data Pipeline - Ingestão de Dados Ativos B3</h1>
+        <p>Arquitetura Medallion para Processamento Near Real Time</p>
+    </div>
+
+    <div class="container">
+        
+        <section id="arquitetura">
+            <h2>📊 Arquitetura do Sistema</h2>
+            <div class="diagram-container">
+                <pre class="mermaid">
+graph LR
+    subgraph Ingestao
+        API[FastAPI] --> Kafka[Kafka Topic: cotacoes]
+    end
+
+    subgraph "Processamento Spark (Medallion)"
+        Kafka --> Bronze[Camada Bronze: RAW]
+        Bronze --> Silver[Camada Silver: Refined]
+        Silver --> Gold[Camada Gold: Aggregated]
+    end
+
+    subgraph Armazenamento
+        Bronze & Silver & Gold --- MinIO[(MinIO / S3)]
+    end
+
+    subgraph Analise
+        MinIO --- Trino[Trino SQL]
+    end
+                </pre>
+            </div>
+        </section>
+
+        <section id="monitoramento">
+            <h2>🖥️ Dashboard de Monitoramento</h2>
+            <div class="dashboard-grid">
+                <a href="http://localhost:9001" class="card" target="_blank">
+                    <h3>MinIO Console</h3>
+                    <p>Gestão de arquivos e logs Delta</p>
+                </a>
+                <a href="http://localhost:8080" class="card" target="_blank">
+                    <h3>Spark Master</h3>
+                    <p>Status das aplicações streaming</p>
+                </a>
+                <a href="http://localhost:8081" class="card" target="_blank">
+                    <h3>Spark Worker</h3>
+                    <p>Uso de recursos do cluster</p>
+                </a>
+                <a href="http://localhost:8000/docs" class="card" target="_blank">
+                    <h3>FastAPI Docs</h3>
+                    <p>Interface de testes da API</p>
+                </a>
+            </div>
+        </section>
+
+        <section id="execucao">
+            <h2>🚀 Guia de Operação</h2>
+            <p>Siga os passos abaixo para garantir a integridade dos dados no seu laboratório.</p>
+            
+            <h3>1. Reset Total</h3>
+            <pre>./reset_pipeline.sh</pre>
+            
+            <h3>2. Iniciar Fluxo</h3>
+            <pre>./start_pipeline.sh</pre>
+            
+            <div class="warning">
+                <strong>⚠️ Nota Importante:</strong> Aguarde 3 minutos após o início para que o Spark crie as pastas no MinIO antes de registrar no Trino.
+            </div>
+        </section>
+
+        <section id="estrategia-tcc">
+            <h2>🎓 Estratégia para Defesa do TCC</h2>
+            <p>O pipeline processa dados continuamente, mas a atualização das cotações depende do plano contratado na Brapi. Por isso, a defesa técnica usa near real time em vez de tempo real estrito.</p>
+
+            <h3>Plano adotado</h3>
+            <ol>
+                <li>Desenvolver e validar o pipeline com Brapi Free.</li>
+                <li>Contratar Brapi Pro por um mês próximo da apresentação para coletar evidências com menor atraso.</li>
+                <li>Manter a camada Gold com janelas de 5 minutos, alinhadas à coleta paga de evidências.</li>
+                <li>Medir separadamente latência da fonte, ingestão e processamento entre Bronze, Silver e Gold.</li>
+                <li>Registrar WebSocket/Cedro como trabalho futuro para market data em tempo real.</li>
+            </ol>
+        </section>
+
+        <section id="trino">
+            <h2>🔍 Consultas de Evidência (Trino)</h2>
+            <p>Comandos essenciais para validar o Medallion e coletar dados para o TCC.</p>
+            
+            <h3>Registro de Tabelas</h3>
+            <pre>
+-- Criar os esquemas
+CREATE SCHEMA IF NOT EXISTS delta.bronze;
+CREATE SCHEMA IF NOT EXISTS delta.silver;
+CREATE SCHEMA IF NOT EXISTS delta.gold;
+
+-- Registrar as tabelas
+CALL delta.system.register_table(schema_name => 'bronze', table_name => 'cotacoes', table_location => 's3a://datalake/bronze/cotacoes');
+CALL delta.system.register_table(schema_name => 'silver', table_name => 'cotacoes', table_location => 's3a://datalake/silver/cotacoes');
+CALL delta.system.register_table(schema_name => 'gold', table_name => 'media_precos_5min', table_location => 's3a://datalake/gold/media_precos_5min');
+            </pre>
+
+            <h3>Query de Volume por Camada</h3>
+            <pre>
+SELECT 'Bronze' as camada, count(*) as total FROM delta.bronze.cotacoes
+UNION ALL
+SELECT 'Silver' as camada, count(*) as total FROM delta.silver.cotacoes
+UNION ALL
+SELECT 'Gold' as camada, count(*) as total FROM delta.gold.media_precos_5min;
+            </pre>
+
+            <h3>Query de Throughput (Vazão)</h3>
+            <pre>
+SELECT 
+    date_trunc('minute', ingestion_timestamp) as minuto_processamento,
+    count(*) as total_registros,
+    round(count(*) / 60.0, 2) as registros_por_segundo
+FROM delta.silver.cotacoes
+GROUP BY 1
+ORDER BY 1 DESC;
+            </pre>
+
+            <h3>Análise de Negócio e Volatilidade</h3>
+            <pre>
+SELECT 
+    ticker,
+    count(*) as num_amostras,
+    round(avg(price), 2) as preco_medio,
+    min(price) as preco_minimo,
+    max(price) as preco_maximo,
+    round(max(price) - min(price), 2) as volatilidade_janela
+FROM delta.silver.cotacoes
+GROUP BY ticker
+ORDER BY num_amostras DESC;
+            </pre>
+
+            <h3>Latência da Camada Gold</h3>
+            <pre>
+SELECT 
+    window_start,
+    window_end,
+    ticker,
+    avg_price,
+    calculation_timestamp,
+    date_diff('second', window_end, calculation_timestamp) as latencia_segundos
+FROM delta.gold.media_precos_5min
+ORDER BY window_end DESC;
+            </pre>
+        </section>
+
+    </div>
+
+    <footer>
+        <p>Projeto desenvolvido por Suzana Alves &copy; 2026</p>
+        <p>Documentação técnica para suporte a Trabalho de Conclusão de Curso.</p>
+    </footer>
+
+</body>
+</html>
