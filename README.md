@@ -2,7 +2,7 @@
 
 Este projeto demonstra um pipeline de dados em near real time para cotações de ativos B3 utilizando a API da Brapi, Kafka, Spark Structured Streaming, Delta Lake, MinIO e Trino.
 
-O processamento é contínuo, mas a latência fim a fim depende também da fonte de dados. Durante o desenvolvimento será usada a Brapi Free, com dados defasados. Para a coleta final de evidências do TCC, a estratégia recomendada é contratar temporariamente a Brapi Pro, que reduz o atraso aproximado das cotações para 5 minutos.
+O processamento é contínuo, mas a latência de ponta a ponta depende também da fonte de dados. Durante o desenvolvimento será usada a Brapi Free, com dados defasados. Para a coleta final de evidências do TCC, a estratégia recomendada é contratar temporariamente a Brapi Pro, que reduz o atraso aproximado das cotações para 5 minutos.
 
 ---
 
@@ -13,7 +13,7 @@ O processamento é contínuo, mas a latência fim a fim depende também da fonte
 
 ---
 
-## ⚡ Guia Rápido: Teste Fim-a-Fim (E2E)
+## ⚡ Guia Rápido: Teste End-to-End (E2E)
 
 Para validar o pipeline completo e ver os dados no Grafana, siga este roteiro exato:
 
@@ -89,7 +89,7 @@ Após iniciar o pipeline, você pode acompanhar o status operacional através de
 O pipeline monitora quatro dimensões de qualidade em tempo real:
 1. **Validade**: Tickers e preços consistentes (Score 100 se não houver rejeições).
 2. **Completude**: Presença de metadados financeiros como `marketCap`.
-3. **Freshness (Frescor)**: Latência fim-a-fim abaixo de 120s (SLA Near Real-Time).
+3. **Freshness (Frescor)**: Latência de ponta  aponta abaixo de 120s (SLA Near Real-Time).
 4. **Integridade**: Sucesso de parsing do JSON bruto na camada Bronze.
 
 Essas métricas são consolidadas no **Data Quality Score (DQS)** global visível no Grafana.
@@ -142,18 +142,18 @@ Principais configurações:
 | `KAFKA_PRODUCER_RETRIES` | Tentativas de reenvio do producer Kafka. | `5` |
 | `KAFKA_PRODUCER_RETRY_BACKOFF_MS` | Intervalo entre retentativas do producer Kafka. | `500` |
 | `KAFKA_PRODUCER_LINGER_MS` | Pequena espera para batching do producer Kafka. | `50` |
-| `LOG_LEVEL` | Nível dos logs estruturados da API, scheduler e jobs Spark. | `INFO` |
+| `LOG_LEVEL` | Nível dos logs estruturados da API, agendador e jobs Spark. | `INFO` |
 | `MINIO_ACCESS_KEY` | Usuário do MinIO/S3 local. | `admin` |
 | `MINIO_SECRET_KEY` | Senha do MinIO/S3 local. | `admin123` |
 | `DATA_LAKE_BUCKET` | Bucket usado para Bronze, Silver, Gold e checkpoints. | `datalake` |
 
-API FastAPI e scheduler são serviços conteinerizados no `docker-compose.yml`. A API publica mensagens no Kafka usando `KAFKA_BOOTSTRAP_SERVERS=kafka:29092`, chaveia os eventos por ticker e aguarda confirmação do broker com `acks=all` e retentativas configuráveis. O scheduler chama a API pela rede interna em `http://api:8000`.
+API FastAPI e agendador são serviços conteinerizados no `docker-compose.yml`. A API publica mensagens no Kafka usando `KAFKA_BOOTSTRAP_SERVERS=kafka:29092`, chaveia os eventos por ticker e aguarda confirmação do broker com `acks=all` e retentativas configuráveis. O agendador chama a API pela rede interna em `http://api:8000`.
 
-Ao iniciar, o scheduler executa uma primeira coleta imediatamente e depois segue o intervalo configurado em `MARKET_DATA_POLL_INTERVAL_MINUTES`. Isso reduz o tempo de espera durante demonstrações e coletas de evidência.
+Ao iniciar, o agendador executa uma primeira coleta imediatamente e depois segue o intervalo configurado em `MARKET_DATA_POLL_INTERVAL_MINUTES`. Isso reduz o tempo de espera durante demonstrações e coletas de evidência.
 
 Antes da publicação no Kafka, a API valida a estrutura da resposta da Brapi com modelos Pydantic. Essa validação funciona como governança de schema na borda de ingestão: respostas sem `results` ou fora do contrato esperado são rejeitadas com erro `502`, enquanto os valores de negócio inválidos continuam sendo tratados pelas regras de qualidade da Silver e pela quarentena.
 
-API, scheduler e jobs Spark emitem logs estruturados em JSON por linha, com campos como `timestamp`, `service`, `event` e contexto operacional. Isso facilita coletar evidências de execução e prepara o projeto para integração futura com ferramentas como Prometheus/Grafana ou uma stack de logs.
+API, agendador e jobs Spark emitem logs estruturados em JSON por linha, com campos como `timestamp`, `service`, `event` e contexto operacional. Isso facilita coletar evidências de execução e prepara o projeto para integração futura com ferramentas como Prometheus/Grafana ou uma stack de logs.
 
 ### 3. Aguardar a Inicialização das Camadas
 **Importante:** O Trino só consegue enxergar as tabelas após o Spark criar os logs do Delta Lake no MinIO.
@@ -225,42 +225,43 @@ A modelagem segue a arquitetura Medallion, separando rastreabilidade, qualidade 
 
 | Camada | Tabela Trino | Finalidade | Tempo principal |
 | :--- | :--- | :--- | :--- |
-| Bronze | `delta.bronze.cotacoes` | Preservar payload bruto, metadados Kafka e resultado do parsing. | `kafka_timestamp` / `ingestion_timestamp` |
-| Silver | `delta.silver.cotacoes` | Manter apenas cotações válidas, tipadas e deduplicadas. | `event_timestamp` |
-| Silver Rejeitados | `delta.silver.cotacoes_rejeitadas` | Auditar registros rejeitados pelas regras de qualidade. | `ingestion_timestamp` |
-| Gold Operacional | `delta.gold.media_precos_ingestao_5min` | Medir comportamento operacional do pipeline por janela de ingestão. | `ingestion_timestamp` |
-| Gold Financeira | `delta.gold.media_precos_evento_5min` | Analisar preços por janela do horário real da cotação. | `event_timestamp` |
+| Bronze | `delta.bronze.cotacoes` | Preservar payload bruto, metadados Kafka e resultado do parsing. | `data_hora_kafka` / `data_hora_ingestao` |
+| Silver | `delta.silver.cotacoes` | Manter apenas cotações válidas, tipadas e deduplicadas. | `data_hora_atualizacao_valor` |
+| Silver Rejeitados | `delta.silver.cotacoes_rejeitadas` | Auditar registros rejeitados pelas regras de qualidade. | `data_hora_ingestao` |
+| Gold Operacional | `delta.gold.media_precos_ingestao_5min` | Medir comportamento operacional do pipeline por janela de ingestão. | `data_hora_ingestao` |
+| Gold Financeira | `delta.gold.media_precos_evento_5min` | Analisar preços por janela do horário real da cotação (evento). | `data_hora_atualizacao_valor` |
 
 ### Bronze: `delta.bronze.cotacoes`
 
 Principais colunas:
 
-- `kafka_topic`, `kafka_partition`, `kafka_offset`, `kafka_key`: metadados de origem para rastreabilidade e replay.
-- `kafka_timestamp`: timestamp atribuído pelo Kafka.
-- `json_value`: payload bruto recebido da API.
-- `bronze_parse_status`: status do parsing (`parsed`, `parse_error`, `no_results`).
-- `ingestion_timestamp`: momento em que o Spark materializou o registro na Bronze.
+- `topico_kafka`, `particao_kafka`, `offset_kafka`, `chave_kafka`: metadados de origem para rastreabilidade e replay.
+- `data_hora_kafka`: timestamp atribuído pelo Kafka.
+- `json_bruto`: payload bruto recebido da API.
+- `status_parse_bronze`: status do parsing (`parse_ok`, `erro_parse`, `sem_resultado`).
+- `data_hora_ingestao`: momento em que o Spark materializou o registro na Bronze.
 - `symbol`, `regularMarketPrice`, `regularMarketTime`, `regularMarketChange`, `marketCap`: campos extraídos da resposta da Brapi quando o parsing é possível.
 
 ### Silver: `delta.silver.cotacoes`
 
 Principais colunas:
 
-- `ticker`: ativo negociado, derivado de `symbol`.
-- `price`: preço tipado como `double`.
-- `change`: variação de mercado.
+- `ticket_ativo_b3`: ativo negociado, derivado de `symbol`.
+- `valor_atual`: preço tipado como `double`.
+- `moeda`: código da moeda (ex: "BRL").
+- `variacao_valor_dia_anterior`: variação nominal.
 - `marketCap`: valor de mercado informado pela fonte.
-- `event_timestamp`: horário real da cotação, derivado de `regularMarketTime`.
-- `date`: data de particionamento da Silver.
-- `kafka_timestamp` e `ingestion_timestamp`: timestamps usados para cálculo de latência.
+- `data_hora_atualizacao_valor`: horário real da cotação na Brapi.
+- `ano_mes_dia`: data de particionamento da Silver (formato `yyyy-MM-dd`).
+- `data_hora_kafka`, `data_hora_ingestao` e `data_hora_processamento_silver`: timestamps usados para cálculo de latência e auditoria.
 
 Regras aplicadas:
 
 - remove ticker nulo ou vazio;
 - remove preço nulo, zero ou negativo;
 - remove timestamp de evento inválido;
-- remove registros sem `ingestion_timestamp`;
-- deduplica por `ticker`, `event_timestamp` e `price`.
+- remove registros sem `data_hora_ingestao`;
+- deduplica por `ticket_ativo_b3`, `data_hora_atualizacao_valor` e `valor_atual`.
 
 ### Silver Rejeitados: `delta.silver.cotacoes_rejeitadas`
 
@@ -268,38 +269,36 @@ Esta tabela preserva registros que não passam nas regras de qualidade da Silver
 
 Principais colunas:
 
-- metadados Kafka e `json_value`, para auditoria;
+- metadados Kafka e `json_bruto`, para auditoria;
 - campos brutos da cotação, quando disponíveis;
-- `event_timestamp` e `ingestion_timestamp`;
-- `rejection_reason`, com motivos como `parse_error`, `no_results`, `invalid_ticker`, `invalid_price`, `invalid_event_timestamp` e `invalid_ingestion_timestamp`.
+- `data_hora_atualizacao_valor` e `data_hora_ingestao`;
+- `rejection_reason`: motivos traduzidos (ex: `ticket_invalido`, `valor_atual_invalido`).
 
 ### Gold Operacional: `delta.gold.media_precos_ingestao_5min`
 
-Agrega a Silver por janelas de 5 minutos usando `ingestion_timestamp`.
+Agrega a Silver por janelas de 5 minutos usando `data_hora_ingestao`.
 
 Principais colunas:
 
-- `window_start`, `window_end`;
-- `ticker`;
-- `avg_price`, `min_price`, `max_price`;
-- `sample_count`;
-- `window_basis = ingestion_timestamp`;
-- `calculation_timestamp`.
-
-Uso principal: medir comportamento operacional do pipeline, volume por janela e latência de cálculo.
+- `inicio_periodo`, `fim_periodo`;
+- `ticket_ativo_b3`;
+- `preco_medio_periodo`, `preco_minimo_periodo`, `preco_maximo_periodo`;
+- `quantidade_amostras`;
+- `periodo_base = data_hora_ingestao`;
+- `data_hora_processamento`.
 
 ### Gold Financeira: `delta.gold.media_precos_evento_5min`
 
-Agrega a Silver por janelas de 5 minutos usando `event_timestamp`.
+Agrega a Silver por janelas de 5 minutos usando `data_hora_atualizacao_valor`.
 
 Principais colunas:
 
-- `window_start`, `window_end`;
-- `ticker`;
-- `avg_price`, `min_price`, `max_price`;
-- `sample_count`;
-- `window_basis = event_timestamp`;
-- `calculation_timestamp`.
+- `inicio_periodo`, `fim_periodo`;
+- `ticket_ativo_b3`;
+- `preco_medio_periodo`, `preco_minimo_periodo`, `preco_maximo_periodo`;
+- `quantidade_amostras`;
+- `periodo_base = data_hora_atualizacao_valor`;
+- `data_hora_processamento`.
 
 Uso principal: análise temporal dos preços pelo horário real da cotação.
 
@@ -314,7 +313,7 @@ O diretório `app/queries/` contém os scripts necessários para extrair as evid
     *   **Uso**: Copie e cole os comandos para validar volume de dados, latência entre camadas e integridade dos preços.
 2.  **`metrics_analysis.py`**:
     *   Script Python para análise de dados e geração de visualizações.
-    *   **Uso**: Após coletar dados por algum tempo, execute este script para gerar insights sobre o desempenho do pipeline.
+    *   **Uso**: Após coletar dados por algum tempo, execute este script para gerar insights sobre o desempenho do pipeline (incluindo percentis p50, p95 e p99).
 
 ---
 
@@ -335,9 +334,9 @@ Plano adotado:
 
 1. **Desenvolvimento com Brapi Free**: manter o custo zero enquanto o pipeline, os testes e a documentação são estabilizados.
 2. **Coleta final com Brapi Pro**: contratar por um mês próximo da apresentação para coletar evidências com atraso aproximado de 5 minutos.
-3. **Duas Golds em janelas de 5 minutos**: separar a Gold Operacional, baseada em `ingestion_timestamp`, da Gold Financeira, baseada em `event_timestamp`. A primeira mede comportamento do pipeline por intervalo de ingestão; a segunda representa a análise temporal da cotação pelo horário real do evento. As escritas das Golds usam modo `complete` para materializar os agregados atuais durante a demonstração.
-4. **Medição de latência fim a fim**: separar latência da fonte, latência de ingestão e latência de processamento entre Bronze, Silver e Gold.
-5. **Quarentena de dados rejeitados**: manter em `silver.cotacoes_rejeitadas` os registros que não atendem às regras de qualidade da Silver, com o motivo de rejeição.
+3. **Duas Golds em janelas de 5 minutos**: separar a Gold Operacional, baseada em `data_hora_ingestao`, da Gold Financeira, baseada em `data_hora_atualizacao_valor`. A primeira mede comportamento do pipeline por intervalo de ingestão; a segunda representa a análise temporal da cotação pelo horário real informado pela Brapi. As escritas das Golds usam modo `complete` para materializar os agregados atuais durante a demonstração.
+4. **Medição de latência fim a fim**: separar latência da fonte, latência de ingestão e latência de processamento entre Bronze, Silver e Gold (utilizando percentis p50, p95 e p99 para análise de cauda).
+5. **Quarentena de dados rejeitados**: manter em `silver.cotacoes_rejeitadas` os registros que não atendem às regras de qualidade da Silver, com o motivo de rejeição traduzido.
 6. **Trabalho futuro com WebSocket/Cedro**: registrar a integração com Market Data via WebSocket como evolução para dados efetivamente em tempo real, sem colocar essa dependência no caminho crítico da entrega.
 
 Essa escolha reduz risco operacional na apresentação e mantém uma justificativa sólida de Engenharia de Dados: a arquitetura é streaming, enquanto a tempestividade dos dados é limitada pelo provedor contratado.
@@ -352,7 +351,7 @@ Este projeto foi desenhado como um ambiente local reprodutível para TCC, não c
 - **MinIO local**: simula armazenamento compatível com S3, mas não substitui políticas produtivas de backup, replicação e controle de acesso.
 - **Orquestração simplificada**: Docker Compose e scripts shell garantem reprodutibilidade local; em produção, um orquestrador como Airflow, Prefect ou Dagster seria mais adequado para retries, lineage e monitoramento.
 - **Fonte de dados limitada pelo provedor**: a arquitetura processa continuamente, mas a atualização das cotações depende do plano contratado na Brapi.
-- **Separação entre tempo operacional e tempo financeiro**: a Gold Operacional usa `ingestion_timestamp` para medir o pipeline, enquanto a Gold Financeira usa `event_timestamp` para análise de mercado.
+- **Separação entre tempo operacional e tempo financeiro**: a Gold Operacional usa `data_hora_ingestao` para medir o pipeline, enquanto a Gold Financeira usa `data_hora_atualizacao_valor` para análise de mercado.
 - **Ambiente Single-Node**: Desenhado para execução em uma única máquina (Docker), não escalado horizontalmente para clusters produtivos.
 
 Essas limitações devem ser apresentadas como decisões de escopo para manter o foco do TCC em arquitetura lakehouse, streaming e mensuração de latência.
@@ -366,12 +365,12 @@ Antes da apresentação, recomenda-se executar uma coleta controlada e registrar
 1. **Subida do ambiente**: containers ativos no Docker Compose, API saudável e Spark jobs em execução.
 2. **Criação das camadas Delta**: pastas Bronze, Silver e Gold no MinIO com `_delta_log`.
 3. **Registro no Trino**: schemas `delta.bronze`, `delta.silver` e `delta.gold` consultáveis.
-4. **Volume por camada**: contagem de registros em Bronze, Silver e Gold usando `relatorio_tcc_metricas.sql`.
+4. **Volume por camada**: contagem de registros em Bronze, Silver e Gold usando `metrics_analysis.py`.
 5. **Qualidade de dados**: quantidade de registros válidos, inválidos filtrados e duplicidades removidas.
 6. **Quarentena**: contagem de rejeitados por `rejection_reason` em `delta.silver.cotacoes_rejeitadas`.
-7. **Latência por etapa**: diferença entre `event_timestamp`, `kafka_timestamp` e `ingestion_timestamp`.
+7. **Latência por etapa**: diferença entre `data_hora_atualizacao_valor`, `data_hora_kafka` e `data_hora_processamento_silver`.
 8. **Throughput**: registros processados por minuto na camada Silver.
-9. **Particionamento**: distribuição física da Silver por `ticker` e `date`.
+9. **Particionamento**: distribuição física da Silver por `ticket_ativo_b3` e `ano_mes_dia`.
 10. **Agregados Gold**: médias, mínimos, máximos e amostras por janela de 5 minutos nas Golds operacional e financeira.
 11. **Limitação da fonte**: evidência do plano Brapi usado e explicação do impacto na latência fim a fim.
 

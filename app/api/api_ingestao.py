@@ -16,12 +16,12 @@ from prometheus_fastapi_instrumentator import Instrumentator
 app = FastAPI()
 Instrumentator().instrument(app).expose(app)
 
-producer = None
+produtor = None
 KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "cotacoes")
-logger = configure_json_logging("api")
+logger = configure_json_logging("api-ingestao")
 
 
-class BrapiQuote(BaseModel):
+class CotacaoBrapi(BaseModel):
     symbol: Optional[str] = None
     shortName: Optional[str] = None
     longName: Optional[str] = None
@@ -45,36 +45,36 @@ class BrapiQuote(BaseModel):
     logourl: Optional[str] = None
 
 
-class BrapiResponse(BaseModel):
-    results: List[BrapiQuote]
+class RespostaBrapi(BaseModel):
+    results: List[CotacaoBrapi]
     requestedAt: Optional[str] = None
     took: Optional[int] = None
 
 
-def _model_to_dict(model: BaseModel) -> Dict[str, Any]:
-    if hasattr(model, "model_dump"):
-        return model.model_dump()
-    return model.dict()
+def _modelo_para_dict(modelo: BaseModel) -> Dict[str, Any]:
+    if hasattr(modelo, "model_dump"):
+        return modelo.model_dump()
+    return modelo.dict()
 
 
-def validate_brapi_payload(data: Dict[str, Any]) -> Dict[str, Any]:
+def validar_payload_brapi(dados: Dict[str, Any]) -> Dict[str, Any]:
     try:
-        payload = BrapiResponse(**data)
+        payload = RespostaBrapi(**dados)
     except ValidationError as exc:
-        log_event(logger, logging.WARNING, "brapi_schema_validation_failed", error=str(exc))
+        log_event(logger, logging.WARNING, "brapi_schema_validation_failed", erro=str(exc))
         raise HTTPException(status_code=502, detail=f"Resposta da Brapi fora do schema esperado: {exc}") from exc
 
     if not payload.results:
         log_event(logger, logging.WARNING, "brapi_empty_results")
         raise HTTPException(status_code=502, detail="Resposta da Brapi sem cotações")
 
-    return _model_to_dict(payload)
+    return _modelo_para_dict(payload)
 
 
-def get_producer():
-    global producer
-    if producer is None:
-        producer = KafkaProducer(
+def obter_produtor():
+    global produtor
+    if produtor is None:
+        produtor = KafkaProducer(
             bootstrap_servers=os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092"),
             acks="all",
             retries=int(os.getenv("KAFKA_PRODUCER_RETRIES", "5")),
@@ -85,7 +85,7 @@ def get_producer():
             key_serializer=lambda v: v.encode("utf-8") if v is not None else None,
             value_serializer=lambda v: json.dumps(v).encode("utf-8")
         )
-    return producer
+    return produtor
 
 
 @app.get("/health")
@@ -94,8 +94,8 @@ def health():
 
 @app.get("/coletar/{ticker}")
 def coletar(ticker: str):
-    normalized_ticker = ticker.upper()
-    log_event(logger, logging.INFO, "market_data_collection_started", ticker=normalized_ticker)
+    ticker_normalizado = ticker.upper()
+    log_event(logger, logging.INFO, "market_data_collection_started", ticker=ticker_normalizado)
 
     url = f"https://brapi.dev/api/quote/{ticker}"
     params = {}
@@ -104,29 +104,29 @@ def coletar(ticker: str):
         params["token"] = token
 
     try:
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        log_event(logger, logging.INFO, "brapi_request_succeeded", ticker=normalized_ticker, status_code=response.status_code)
+        resposta = requests.get(url, params=params, timeout=10)
+        resposta.raise_for_status()
+        dados = resposta.json()
+        log_event(logger, logging.INFO, "brapi_request_succeeded", ticker=ticker_normalizado, status_code=resposta.status_code)
     except requests.RequestException as exc:
-        log_event(logger, logging.ERROR, "brapi_request_failed", ticker=normalized_ticker, error=str(exc))
+        log_event(logger, logging.INFO, "brapi_request_failed", ticker=ticker_normalizado, erro=str(exc))
         raise HTTPException(status_code=502, detail=f"Falha ao consultar Brapi: {exc}") from exc
     except ValueError as exc:
-        log_event(logger, logging.ERROR, "brapi_invalid_json", ticker=normalized_ticker, error=str(exc))
+        log_event(logger, logging.ERROR, "brapi_invalid_json", ticker=ticker_normalizado, erro=str(exc))
         raise HTTPException(status_code=502, detail="Resposta inválida da Brapi") from exc
 
-    validated_data = validate_brapi_payload(data)
+    dados_validados = validar_payload_brapi(dados)
 
     try:
-        kafka_producer = get_producer()
-        future = kafka_producer.send(KAFKA_TOPIC, key=normalized_ticker, value=validated_data)
+        kafka_producer = obter_produtor()
+        future = kafka_producer.send(KAFKA_TOPIC, key=ticker_normalizado, value=dados_validados)
         future.get(timeout=15)
-        log_event(logger, logging.INFO, "kafka_publish_succeeded", ticker=normalized_ticker, topic=KAFKA_TOPIC)
+        log_event(logger, logging.INFO, "kafka_publish_succeeded", ticker=ticker_normalizado, topic=KAFKA_TOPIC)
     except KafkaError as exc:
-        log_event(logger, logging.ERROR, "kafka_publish_failed", ticker=normalized_ticker, topic=KAFKA_TOPIC, error=str(exc))
+        log_event(logger, logging.ERROR, "kafka_publish_failed", ticker=ticker_normalizado, topic=KAFKA_TOPIC, erro=str(exc))
         raise HTTPException(status_code=503, detail=f"Falha ao publicar no Kafka: {exc}") from exc
     except Exception as exc:
-        log_event(logger, logging.ERROR, "kafka_publish_unexpected_error", ticker=normalized_ticker, topic=KAFKA_TOPIC, error=str(exc))
+        log_event(logger, logging.ERROR, "kafka_publish_unexpected_error", ticker=ticker_normalizado, topic=KAFKA_TOPIC, erro=str(exc))
         raise HTTPException(status_code=503, detail=f"Falha inesperada ao publicar no Kafka: {exc}") from exc
 
-    return {"status": "enviado", "ticker": normalized_ticker}
+    return {"status": "enviado", "ticker": ticker_normalizado}
