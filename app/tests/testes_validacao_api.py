@@ -1,11 +1,11 @@
 import pytest
 from fastapi import HTTPException
 
-from app.api.lambda_api import validate_brapi_payload
+from api.api_ingestao import validar_payload_brapi
 
 
-def test_validate_brapi_payload_normalizes_known_fields():
-    data = {
+def test_validar_payload_brapi_normaliza_campos_conhecidos():
+    dados = {
        "results": [
         {
             "symbol": "PETR4",
@@ -35,7 +35,7 @@ def test_validate_brapi_payload_normalizes_known_fields():
     "took": 1
 }
 
-    payload = validate_brapi_payload(data)
+    payload = validar_payload_brapi(dados)
 
     assert payload == {
         "results": [
@@ -68,17 +68,17 @@ def test_validate_brapi_payload_normalizes_known_fields():
 }
 
 
-def test_validate_brapi_payload_rejects_empty_results():
+def test_validar_payload_brapi_rejeita_resultados_vazios():
     with pytest.raises(HTTPException) as exc:
-        validate_brapi_payload({"results": []})
+        validar_payload_brapi({"results": []})
 
     assert exc.value.status_code == 502
     assert "sem cotações" in exc.value.detail
 
 
-def test_validate_brapi_payload_rejects_invalid_schema():
+def test_validar_payload_brapi_rejeita_schema_invalido():
     with pytest.raises(HTTPException) as exc:
-        validate_brapi_payload({"results": "PETR4"})
+        validar_payload_brapi({"results": "PETR4"})
 
     assert exc.value.status_code == 502
     assert "schema esperado" in exc.value.detail

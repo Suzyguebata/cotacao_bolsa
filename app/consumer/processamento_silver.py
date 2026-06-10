@@ -21,17 +21,17 @@ CHECKPOINT_SILVER = os.getenv("CHECKPOINT_SILVER", f"s3a://{DATA_LAKE_BUCKET}/ch
 logger = configure_json_logging("spark-silver")
 
 
-def wait_for_bronze():
+def aguardar_bronze():
     print("Aguardando inicializacao da camada Bronze...")
-    log_event(logger, logging.INFO, "waiting_for_bronze", bronze_path=BRONZE_PATH)
-    client = Minio(MINIO_ENDPOINT_URL, access_key=MINIO_ACCESS_KEY, secret_key=MINIO_SECRET_KEY, secure=False)
-    while not client.bucket_exists(DATA_LAKE_BUCKET) or len(list(client.list_objects(DATA_LAKE_BUCKET, prefix="bronze/cotacoes/_delta_log/"))) == 0:
+    log_event(logger, logging.INFO, "waiting_for_bronze", caminho_bronze=BRONZE_PATH)
+    cliente = Minio(MINIO_ENDPOINT_URL, access_key=MINIO_ACCESS_KEY, secret_key=MINIO_SECRET_KEY, secure=False)
+    while not cliente.bucket_exists(DATA_LAKE_BUCKET) or len(list(cliente.list_objects(DATA_LAKE_BUCKET, prefix="bronze/cotacoes/_delta_log/"))) == 0:
         time.sleep(5)
     print("Camada Bronze detectada. Iniciando Silver...")
-    log_event(logger, logging.INFO, "bronze_detected", bronze_path=BRONZE_PATH)
+    log_event(logger, logging.INFO, "bronze_detected", caminho_bronze=BRONZE_PATH)
 
 
-def build_spark_session():
+def criar_sessao_spark():
     return SparkSession.builder \
         .appName("Bronze_to_Silver_Refinement") \
         .config("spark.jars.packages", "io.delta:delta-spark_2.12:3.0.0,org.apache.hadoop:hadoop-aws:3.3.4") \
@@ -46,9 +46,9 @@ def build_spark_session():
 
 
 def main():
-    log_event(logger, logging.INFO, "spark_silver_starting", input_path=BRONZE_PATH, output_path=SILVER_PATH, checkpoint_path=CHECKPOINT_SILVER)
-    wait_for_bronze()
-    spark = build_spark_session()
+    log_event(logger, logging.INFO, "spark_silver_starting", caminho_entrada=BRONZE_PATH, caminho_saida=SILVER_PATH, caminho_checkpoint=CHECKPOINT_SILVER)
+    aguardar_bronze()
+    spark = criar_sessao_spark()
 
     df_bronze = spark.readStream \
         .format("delta") \
@@ -59,13 +59,13 @@ def main():
     query = df_silver.writeStream \
         .format("delta") \
         .outputMode("append") \
-        .partitionBy("ticket_ativo_b3", "data") \
+        .partitionBy("ticket_ativo_b3", "ano_mes_dia") \
         .trigger(processingTime='5 minutes') \
         .option("checkpointLocation", CHECKPOINT_SILVER) \
         .start(SILVER_PATH)
 
     print(f"Refinamento Silver iniciado. Gravando em: {SILVER_PATH}")
-    log_event(logger, logging.INFO, "spark_silver_stream_started", input_path=BRONZE_PATH, output_path=SILVER_PATH, checkpoint_path=CHECKPOINT_SILVER)
+    log_event(logger, logging.INFO, "spark_silver_stream_started", caminho_entrada=BRONZE_PATH, caminho_saida=SILVER_PATH, caminho_checkpoint=CHECKPOINT_SILVER)
     query.awaitTermination()
 
 

@@ -23,19 +23,19 @@ CHECKPOINT_PATH = os.getenv("CHECKPOINT_BRONZE", f"s3a://{DATA_LAKE_BUCKET}/chec
 logger = configure_json_logging("spark-bronze")
 
 
-def ensure_bucket():
+def garantir_bucket():
     try:
-        client = Minio(MINIO_ENDPOINT_URL, access_key=MINIO_ACCESS_KEY, secret_key=MINIO_SECRET_KEY, secure=False)
-        if not client.bucket_exists(DATA_LAKE_BUCKET):
-            client.make_bucket(DATA_LAKE_BUCKET)
+        cliente = Minio(MINIO_ENDPOINT_URL, access_key=MINIO_ACCESS_KEY, secret_key=MINIO_SECRET_KEY, secure=False)
+        if not cliente.bucket_exists(DATA_LAKE_BUCKET):
+            cliente.make_bucket(DATA_LAKE_BUCKET)
             print(f"Bucket '{DATA_LAKE_BUCKET}' criado com sucesso.")
             log_event(logger, logging.INFO, "bucket_created", bucket=DATA_LAKE_BUCKET)
     except Exception as e:
         print(f"Aviso ao verificar bucket: {e}")
-        log_event(logger, logging.WARNING, "bucket_check_failed", bucket=DATA_LAKE_BUCKET, error=str(e))
+        log_event(logger, logging.WARNING, "bucket_check_failed", bucket=DATA_LAKE_BUCKET, erro=str(e))
 
 
-def build_spark_session():
+def criar_sessao_spark():
     return SparkSession.builder \
         .appName("Brapi_Kafka_to_Bronze") \
         .config("spark.jars.packages", "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,io.delta:delta-spark_2.12:3.0.0,org.apache.hadoop:hadoop-aws:3.3.4") \
@@ -50,9 +50,9 @@ def build_spark_session():
 
 
 def main():
-    log_event(logger, logging.INFO, "spark_bronze_starting", topic=KAFKA_TOPIC, output_path=BRONZE_PATH, checkpoint_path=CHECKPOINT_PATH)
-    ensure_bucket()
-    spark = build_spark_session()
+    log_event(logger, logging.INFO, "spark_bronze_starting", topico=KAFKA_TOPIC, caminho_saida=BRONZE_PATH, caminho_checkpoint=CHECKPOINT_PATH)
+    garantir_bucket()
+    spark = criar_sessao_spark()
 
     df_kafka = spark.readStream \
         .format("kafka") \
@@ -61,9 +61,9 @@ def main():
         .option("startingOffsets", "earliest") \
         .load()
 
-    df_parsed = transformar_kafka_para_bronze(df_kafka)
+    df_bronze = transformar_kafka_para_bronze(df_kafka)
 
-    query = df_parsed.writeStream \
+    query = df_bronze.writeStream \
         .format("delta") \
         .outputMode("append") \
         .trigger(processingTime='5 minutes') \
@@ -71,7 +71,7 @@ def main():
         .start(BRONZE_PATH)
 
     print(f"Streaming Bronze iniciado. Gravando em: {BRONZE_PATH}")
-    log_event(logger, logging.INFO, "spark_bronze_stream_started", topic=KAFKA_TOPIC, output_path=BRONZE_PATH, checkpoint_path=CHECKPOINT_PATH)
+    log_event(logger, logging.INFO, "spark_bronze_stream_started", topico=KAFKA_TOPIC, caminho_saida=BRONZE_PATH, caminho_checkpoint=CHECKPOINT_PATH)
     query.awaitTermination()
 
 

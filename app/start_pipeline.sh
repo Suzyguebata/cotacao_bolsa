@@ -12,7 +12,7 @@ echo
 
 # 2. Executar Testes Unitários no Docker
 echo "[2/4] Executando Testes Unitários (Spark Transformation)..."
-MSYS_NO_PATHCONV=1 docker exec -u root app-spark-bronze-1 /usr/bin/python3 -m pytest /app/tests/test_spark_logic.py
+MSYS_NO_PATHCONV=1 docker exec -u root app-spark-bronze-1 /usr/bin/python3 -m pytest /app/tests/testes_logica_spark.py
 if [ $? -ne 0 ]; then
     echo "[ERRO] Os testes unitários falharam! Verifique a lógica do Spark."
     exit 1
