@@ -102,7 +102,7 @@ QUERIES = {
             preco_minimo_periodo,
             preco_maximo_periodo,
             quantidade_amostras
-        FROM delta.gold.media_precos_evento_5min
+        FROM delta.gold.media_precos_atualizacao_5min
         ORDER BY inicio_periodo DESC
         LIMIT 10;
     """,

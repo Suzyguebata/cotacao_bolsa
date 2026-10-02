@@ -18,6 +18,10 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' || startsWith(github.head_ref, 'feature/')
 
+    # O contexto `secrets` não é permitido em `if:` de steps; expõe via env.
+    env:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
     defaults:
       run:
         working-directory: app
@@ -29,41 +33,26 @@ jobs:
       - name: Build Spark image
         run: docker compose build spark-bronze
 
-      - name: Run Spark transformation tests with coverage (persist results)
-        run: |
-          CONTAINER_NAME=spark-test
-          docker compose run --no-deps --user root --name $CONTAINER_NAME spark-bronze /usr/bin/python3 -m pytest /app/tests/testes_logica_spark.py --cov=app --cov-report=xml:/app/coverage-spark.xml || true
-          if docker ps -a --format '{{.Names}}' | grep -q "^$CONTAINER_NAME$"; then
-            docker cp "$CONTAINER_NAME":/app/coverage-spark.xml "$GITHUB_WORKSPACE/coverage-spark.xml" || true
-            docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
-          fi
+      # O compose monta ./app em /app, então os XMLs de cobertura já ficam em app/ no runner.
+      - name: Run Spark transformation tests with coverage
+        run: docker compose run --rm --no-deps --user root spark-bronze /usr/bin/python3 -m pytest /app/tests/testes_logica_spark.py --cov=/app --cov-report=xml:/app/coverage-spark.xml
 
       - name: Build API image
         run: docker compose build api
 
-      - name: Run API validation tests with coverage (persist results)
-        run: |
-          CONTAINER_NAME=api-test
-          docker compose run --no-deps --name $CONTAINER_NAME api python -m pytest /app/tests/testes_validacao_api.py /app/tests/testes_agendador.py --cov=app --cov-report=xml:/app/coverage-api.xml || true
-          if docker ps -a --format '{{.Names}}' | grep -q "^$CONTAINER_NAME$"; then
-            docker cp "$CONTAINER_NAME":/app/coverage-api.xml "$GITHUB_WORKSPACE/coverage-api.xml" || true
-            docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
-          fi
+      - name: Run API validation tests with coverage
+        run: docker compose run --rm --no-deps api python -m pytest /app/tests/testes_validacao_api.py /app/tests/testes_agendador.py --cov=/app --cov-report=xml:/app/coverage-api.xml
 
       - name: Check API and agendador syntax
         run: docker compose run --rm --no-deps api python -m py_compile /app/api/api_ingestao.py /app/agendador.py
 
       - name: Sonar scan on runner (if SONAR_TOKEN set)
-        if: secrets.SONAR_TOKEN != ''
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        if: env.SONAR_TOKEN != ''
+        continue-on-error: true
         run: |
-          echo "SONAR_TOKEN present; attempting Sonar scan on runner using dockerized sonar-scanner."
-          if [ -f "$GITHUB_WORKSPACE/sonar-project.properties" ]; then
-            docker run --rm -e SONAR_TOKEN="$SONAR_TOKEN" -v "$GITHUB_WORKSPACE:/usr/src" sonarsource/sonar-scanner-cli -Dsonar.login=$SONAR_TOKEN || true
-          else
-            echo "No sonar-project.properties found at repo root; skipping Sonar scan."
-          fi
+          # Os relatórios apontam para /app (caminho no container); o scanner monta o repo em /usr/src.
+          sed -i 's#<source>/app</source>#<source>/usr/src/app</source>#' coverage-*.xml
+          docker run --rm -e SONAR_TOKEN -v "$GITHUB_WORKSPACE:/usr/src" sonarsource/sonar-scanner-cli
 
       - name: Clean Docker Compose resources
         if: always()

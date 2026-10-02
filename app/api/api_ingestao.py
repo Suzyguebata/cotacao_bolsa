@@ -8,6 +8,7 @@ from pydantic import BaseModel, ValidationError
 import json
 import logging
 import os
+import re
 from typing import Any, Dict, List, Optional
 
 from observability.logging_utils import configure_json_logging, log_event
@@ -18,6 +19,10 @@ Instrumentator().instrument(app).expose(app)
 
 produtor = None
 KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "cotacoes")
+BRAPI_TIMEOUT_SECONDS = 10
+KAFKA_PUBLISH_TIMEOUT_SECONDS = 15
+# Ações/FIIs/BDRs (PETR4, BOVA11, AAPL34) e índices (^BVSP); bloqueia "/", "?" etc. na URL da Brapi.
+TICKER_PATTERN = re.compile(r"\^?[A-Z0-9]{3,12}")
 logger = configure_json_logging("api-ingestao")
 
 
@@ -62,7 +67,7 @@ def validar_payload_brapi(dados: Dict[str, Any]) -> Dict[str, Any]:
         payload = RespostaBrapi(**dados)
     except ValidationError as exc:
         log_event(logger, logging.WARNING, "brapi_schema_validation_failed", erro=str(exc))
-        raise HTTPException(status_code=502, detail=f"Resposta da Brapi fora do schema esperado: {exc}") from exc
+        raise HTTPException(status_code=502, detail="Resposta da Brapi fora do schema esperado") from exc
 
     if not payload.results:
         log_event(logger, logging.WARNING, "brapi_empty_results")
@@ -88,15 +93,15 @@ def obter_produtor():
     return produtor
 
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
+def normalizar_ticker(ticker: str) -> str:
+    ticker_normalizado = ticker.strip().upper()
+    if not TICKER_PATTERN.fullmatch(ticker_normalizado):
+        log_event(logger, logging.WARNING, "invalid_ticker_rejected", ticker=ticker)
+        raise HTTPException(status_code=400, detail="Ticker inválido")
+    return ticker_normalizado
 
-@app.get("/coletar/{ticker}")
-def coletar(ticker: str):
-    ticker_normalizado = ticker.upper()
-    log_event(logger, logging.INFO, "market_data_collection_started", ticker=ticker_normalizado)
 
+def consultar_brapi(ticker: str) -> Dict[str, Any]:
     url = f"https://brapi.dev/api/quote/{ticker}"
     params = {}
     token = os.getenv("BRAPI_TOKEN")
@@ -104,29 +109,51 @@ def coletar(ticker: str):
         params["token"] = token
 
     try:
-        resposta = requests.get(url, params=params, timeout=10)
+        resposta = requests.get(url, params=params, timeout=BRAPI_TIMEOUT_SECONDS)
         resposta.raise_for_status()
         dados = resposta.json()
-        log_event(logger, logging.INFO, "brapi_request_succeeded", ticker=ticker_normalizado, status_code=resposta.status_code)
+        log_event(logger, logging.INFO, "brapi_request_succeeded", ticker=ticker, status_code=resposta.status_code)
     except requests.RequestException as exc:
-        log_event(logger, logging.INFO, "brapi_request_failed", ticker=ticker_normalizado, erro=str(exc))
-        raise HTTPException(status_code=502, detail=f"Falha ao consultar Brapi: {exc}") from exc
+        log_event(logger, logging.WARNING, "brapi_request_failed", ticker=ticker, erro=str(exc))
+        raise HTTPException(status_code=502, detail="Falha ao consultar Brapi") from exc
     except ValueError as exc:
-        log_event(logger, logging.ERROR, "brapi_invalid_json", ticker=ticker_normalizado, erro=str(exc))
+        log_event(logger, logging.ERROR, "brapi_invalid_json", ticker=ticker, erro=str(exc))
         raise HTTPException(status_code=502, detail="Resposta inválida da Brapi") from exc
 
+    return dados
+
+
+def publicar_cotacao(ticker: str, dados: Dict[str, Any]) -> None:
+    """Valida o payload da Brapi e publica no Kafka.
+
+    Ponto único de entrada no Kafka: usado pela coleta via trigger (/coletar)
+    e reutilizável por um futuro endpoint de webhook da Brapi.
+    """
     dados_validados = validar_payload_brapi(dados)
 
     try:
         kafka_producer = obter_produtor()
-        future = kafka_producer.send(KAFKA_TOPIC, key=ticker_normalizado, value=dados_validados)
-        future.get(timeout=15)
-        log_event(logger, logging.INFO, "kafka_publish_succeeded", ticker=ticker_normalizado, topic=KAFKA_TOPIC)
+        future = kafka_producer.send(KAFKA_TOPIC, key=ticker, value=dados_validados)
+        future.get(timeout=KAFKA_PUBLISH_TIMEOUT_SECONDS)
+        log_event(logger, logging.INFO, "kafka_publish_succeeded", ticker=ticker, topic=KAFKA_TOPIC)
     except KafkaError as exc:
-        log_event(logger, logging.ERROR, "kafka_publish_failed", ticker=ticker_normalizado, topic=KAFKA_TOPIC, erro=str(exc))
-        raise HTTPException(status_code=503, detail=f"Falha ao publicar no Kafka: {exc}") from exc
+        log_event(logger, logging.ERROR, "kafka_publish_failed", ticker=ticker, topic=KAFKA_TOPIC, erro=str(exc))
+        raise HTTPException(status_code=503, detail="Falha ao publicar no Kafka") from exc
     except Exception as exc:
-        log_event(logger, logging.ERROR, "kafka_publish_unexpected_error", ticker=ticker_normalizado, topic=KAFKA_TOPIC, erro=str(exc))
-        raise HTTPException(status_code=503, detail=f"Falha inesperada ao publicar no Kafka: {exc}") from exc
+        log_event(logger, logging.ERROR, "kafka_publish_unexpected_error", ticker=ticker, topic=KAFKA_TOPIC, erro=str(exc))
+        raise HTTPException(status_code=503, detail="Falha inesperada ao publicar no Kafka") from exc
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+@app.get("/coletar/{ticker}")
+def coletar(ticker: str):
+    ticker_normalizado = normalizar_ticker(ticker)
+    log_event(logger, logging.INFO, "market_data_collection_started", ticker=ticker_normalizado)
+
+    dados = consultar_brapi(ticker_normalizado)
+    publicar_cotacao(ticker_normalizado, dados)
 
     return {"status": "enviado", "ticker": ticker_normalizado}

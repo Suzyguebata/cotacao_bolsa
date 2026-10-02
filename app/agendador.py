@@ -16,6 +16,9 @@ ATIVOS = [
 ]
 API_URL = os.getenv("MARKET_DATA_API_URL", "http://localhost:8000/coletar/{}")
 POLL_INTERVAL_MINUTES = int(os.getenv("MARKET_DATA_POLL_INTERVAL_MINUTES", "5"))
+# Precisa superar o pior caso da API (10s Brapi + 15s confirmação Kafka) para não
+# registrar falha em coletas que foram publicadas com sucesso.
+API_TIMEOUT_SECONDS = int(os.getenv("MARKET_DATA_API_TIMEOUT_SECONDS", "30"))
 logger = configure_json_logging("agendador")
 
 
@@ -29,7 +32,7 @@ def executar_coleta():
         try:
             url = API_URL.format(ticker)
             print(f"Coletando {ticker} ... ", end="")
-            resposta = requests.get(url, timeout=15)
+            resposta = requests.get(url, timeout=API_TIMEOUT_SECONDS)
 
             if resposta.status_code == 200:
                 print("OK")
