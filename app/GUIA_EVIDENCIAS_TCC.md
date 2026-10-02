@@ -2,6 +2,75 @@
 
 Este roteiro ajuda a coletar evidencias reproduziveis da API e do pipeline de cotacoes. A janela planejada para a evidencia e o pregao de acoes, das 09:45 as 18:00 no horario de Brasilia, incluindo o after-market. O fluxo atual e baseado em polling: o agendador chama a rota interna FastAPI `GET /coletar/{ticker}`; essa rota consulta primeiro a rota externa Brapi v2 `GET /api/v2/stocks/quote?symbols={ticker}`, valida a resposta e publica no Kafka. Se a v2 falhar, a API tenta o endpoint legado Brapi `/api/quote/{ticker}` como fallback. A rota interna `/coletar/{ticker}` continua existindo; a migracao para v2 e na chamada da API para a Brapi. Isso demonstra ingestao near real time por polling, nao notificacoes/webhooks da Brapi. A configuracao atual cobre os 15 tickers de acoes definidos em `.env`; ela nao coleta opcoes, ETFs ou futuros.
 
+## Roteiro do dia da coleta (siga este bloco)
+
+Este bloco e a sequencia completa para um dia de pregao com o ambiente ja preparado (tabelas Delta criadas e registradas no Trino). As secoes 1 a 4 abaixo sao a referencia detalhada de cada passo. Rode todos os comandos no Git Bash, dentro de `app/`. Troque `2026-10-02` pela data real da coleta; nao ha pregao aos sabados, domingos e feriados.
+
+**Nao execute neste dia:**
+
+| Comando | Motivo |
+|---|---|
+| `./reset_pipeline.sh` | Apaga as tabelas ja criadas e registradas; os dados de ensaios fora da janela 09:45-18:00 nao entram no relatorio. |
+| `./start_pipeline.sh` | Sobe o agendador junto e inicia a coleta antes da captura de logs. |
+| `docker-compose up -d --build api` | O codigo e montado como volume; a API ja usa a versao atual. |
+| `./register_trino_tables.sh` | As tabelas ja estao registradas (so e necessario apos um reset). |
+
+### 09:15 - Conferencia (nenhuma coleta e feita)
+
+```bash
+cd app
+docker-compose up -d zookeeper kafka kafka-init minio spark-master spark-worker trino api spark-bronze spark-silver spark-quarentena spark-gold-operacional spark-gold-financeiro prometheus grafana
+docker-compose ps
+curl -i http://localhost:8000/health
+docker-compose exec -T trino trino --execute "SHOW TABLES FROM delta.gold"
+mkdir -p evidencias/logs
+```
+
+- O `up -d` nao altera servicos que ja estao rodando; se o Docker foi desligado, religa tudo mantendo dados e registros do Trino.
+- Em `docker-compose ps`: todos `running`, **`agendador` ausente**, e `spark-silver`/`spark-quarentena` nao podem estar `Exited` (se estiverem, veja a secao 1 sobre `delta_table_schema_incompatible`).
+- `curl` deve retornar `200`; `SHOW TABLES` deve listar `media_precos_atualizacao_5min` e `media_precos_ingestao_5min`.
+- Confira o saldo de requisicoes do plano Brapi (cerca de 1.485 chamadas no dia).
+
+### 09:44 - Terminal 1: captura de logs (fica aberto ate 18:00)
+
+```bash
+docker-compose logs --follow --tail=0 --timestamps --no-color | tee evidencias/logs/pipeline-sessao.log
+```
+
+### 09:45 - Terminal 2: inicio da coleta
+
+```bash
+docker-compose up -d agendador
+grep scheduler_ evidencias/logs/pipeline-sessao.log
+```
+
+O `grep` deve mostrar `scheduler_started` e `scheduler_cycle_started`. Se nao mostrar, encerre o Terminal 1 com `Ctrl+C` e inicie a captura novamente gravando em `evidencias/logs/pipeline-sessao-2.log`.
+
+### Durante o pregao (a partir de ~10:15)
+
+- Salve as capturas em `docs/assets/evidencias/`: `01-grafana.png`, `02-minio-spark.png` e `03-logs-trino.png` (secao 4). Nao mostre o token nem o `.env`.
+- Opcional: `grep scheduler_cycle_finished evidencias/logs/pipeline-sessao.log | tail -3` para acompanhar `sucessos`/`falhas` dos ultimos ciclos.
+
+### 18:00 - Fim da coleta
+
+- Terminal 2: `docker-compose stop agendador`
+- Terminal 1: `Ctrl+C` (encerra so a captura; os containers continuam rodando).
+
+### 18:15 - Apos 15 minutos de processamento Spark
+
+```bash
+docker-compose logs --since 2026-10-02T09:00:00 --timestamps --no-color > evidencias/logs/pipeline-sessao-completa.log
+bash ./exportar_relatorio_tcc.sh 2026-10-02
+grep -rn "token=" evidencias/
+```
+
+- O ultimo `grep` deve retornar vazio.
+- Gere os arquivos filtrados de logs (comandos `grep` da secao 2) e confira o relatorio em `evidencias/queries/` (secao 3).
+- Se a coleta comecou ou terminou fora do horario padrao, informe a janela real: `bash ./exportar_relatorio_tcc.sh 2026-10-02 10:10 18:00`.
+- So depois de preservar logs e relatorio considere desligar o ambiente; nunca rode `reset_pipeline.sh` antes disso.
+
+---
+
 ## 1. Preparar a execucao
 
 No Git Bash, entre em `app` e confira o arquivo `.env`:
