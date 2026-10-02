@@ -41,7 +41,7 @@ jobs:
         run: docker compose build api
 
       - name: Run API validation tests with coverage
-        run: docker compose run --rm --no-deps api python -m pytest /app/tests/testes_validacao_api.py /app/tests/testes_agendador.py --cov=/app --cov-report=xml:/app/coverage-api.xml
+        run: docker compose run --rm --no-deps api python -m pytest /app/tests/testes_validacao_api.py /app/tests/testes_agendador.py /app/tests/testes_compatibilidade.py --cov=/app --cov-report=xml:/app/coverage-api.xml
 
       - name: Check API and agendador syntax
         run: docker compose run --rm --no-deps api python -m py_compile /app/api/api_ingestao.py /app/agendador.py

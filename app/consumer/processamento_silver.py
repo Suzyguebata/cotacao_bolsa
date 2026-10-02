@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import time
 from minio import Minio
+from consumer.compatibilidade import garantir_tabela_compativel
 from consumer.tratamento import transformar_bronze_para_silver
 from observability.logging_utils import configure_json_logging, log_event
 
@@ -18,6 +19,7 @@ DATA_LAKE_BUCKET = os.getenv("DATA_LAKE_BUCKET", "datalake")
 BRONZE_PATH = os.getenv("BRONZE_PATH", f"s3a://{DATA_LAKE_BUCKET}/bronze/cotacoes")
 SILVER_PATH = os.getenv("SILVER_PATH", f"s3a://{DATA_LAKE_BUCKET}/silver/cotacoes")
 CHECKPOINT_SILVER = os.getenv("CHECKPOINT_SILVER", f"s3a://{DATA_LAKE_BUCKET}/checkpoints/silver_cotacoes")
+PARTICOES_SILVER = ["ticket_ativo_b3", "ano_mes_dia"]
 logger = configure_json_logging("spark-silver")
 
 
@@ -55,11 +57,12 @@ def main():
         .load(BRONZE_PATH)
 
     df_silver = transformar_bronze_para_silver(df_bronze)
+    garantir_tabela_compativel(spark, SILVER_PATH, df_silver, PARTICOES_SILVER, logger, log_event)
 
     query = df_silver.writeStream \
         .format("delta") \
         .outputMode("append") \
-        .partitionBy("ticket_ativo_b3", "ano_mes_dia") \
+        .partitionBy(*PARTICOES_SILVER) \
         .trigger(processingTime='5 minutes') \
         .option("checkpointLocation", CHECKPOINT_SILVER) \
         .start(SILVER_PATH)

@@ -31,7 +31,7 @@
         {
           "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
           "queryType": "query",
-          "rawSQL": "SELECT current_timestamp as time, round(((1.0 * count_if(ticket_ativo_b3 IS NOT NULL AND valor_atual > 0) / count(*)) + (1.0 * count_if(valor_mercado_total IS NOT NULL AND valor_mercado_total > 0) / count(*)) + (1.0 * count_if(date_diff('second', data_hora_atualizacao_valor, data_hora_ingestao) < 600) / count(*))) / 3.0 * 100, 2) as dqs_global FROM delta.silver.cotacoes",
+          "rawSQL": "SELECT current_timestamp as time, round(((1.0 * count_if(ticket_ativo_b3 IS NOT NULL AND valor_atual > 0) / count(*)) + (1.0 * count_if(valor_mercado_total IS NOT NULL AND valor_mercado_total > 0) / count(*)) + (1.0 * count_if(data_hora_kafka IS NOT NULL AND data_hora_processamento_silver IS NOT NULL AND date_diff('second', data_hora_kafka, data_hora_processamento_silver) BETWEEN 0 AND 660) / count(*))) / 3.0 * 100, 2) as dqs_global FROM delta.silver.cotacoes",
           "refId": "A"
         }
       ],
@@ -100,11 +100,11 @@
         {
           "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
           "queryType": "query",
-          "rawSQL": "SELECT current_timestamp as time, round(100.0 * count_if(date_diff('second', data_hora_atualizacao_valor, data_hora_ingestao) < 600) / count(*), 2) as freshness FROM delta.silver.cotacoes",
+          "rawSQL": "SELECT current_timestamp as time, round(100.0 * count_if(data_hora_kafka IS NOT NULL AND data_hora_processamento_silver IS NOT NULL AND date_diff('second', data_hora_kafka, data_hora_processamento_silver) BETWEEN 0 AND 660) / count(*), 2) as freshness FROM delta.silver.cotacoes",
           "refId": "A"
         }
       ],
-      "title": "Dimensão: FRESHNESS (Tempestividade)",
+      "title": "Dimensão: FRESHNESS interna (Kafka → Silver, ≤660s = 2 triggers de 5 min + 60s)",
       "type": "gauge"
     },
     {
@@ -116,8 +116,8 @@
             "mode": "absolute",
             "steps": [
               { "color": "green", "value": null },
-              { "color": "yellow", "value": 150 },
-              { "color": "red", "value": 300 }
+              { "color": "yellow", "value": 660 },
+              { "color": "red", "value": 900 }
             ]
           },
           "unit": "s"
@@ -132,16 +132,16 @@
         {
           "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
           "queryType": "query",
-          "rawSQL": "SELECT approx_percentile(date_diff('second', data_hora_atualizacao_valor, data_hora_ingestao), 0.5) AS p50, approx_percentile(date_diff('second', data_hora_atualizacao_valor, data_hora_ingestao), 0.95) AS p95, approx_percentile(date_diff('second', data_hora_atualizacao_valor, data_hora_ingestao), 0.99) AS p99 FROM delta.silver.cotacoes",
+          "rawSQL": "SELECT approx_percentile(date_diff('second', data_hora_kafka, data_hora_processamento_silver), 0.5) AS p50, approx_percentile(date_diff('second', data_hora_kafka, data_hora_processamento_silver), 0.95) AS p95, approx_percentile(date_diff('second', data_hora_kafka, data_hora_processamento_silver), 0.99) AS p99 FROM delta.silver.cotacoes WHERE data_hora_kafka IS NOT NULL AND data_hora_processamento_silver IS NOT NULL",
           "refId": "A"
         }
       ],
-      "title": "Performance: Percentis de Latência (P50, P95, P99)",
+      "title": "Performance: Latência interna Kafka-Silver (P50, P95, P99)",
       "type": "gauge"
     },
     {
       "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
-      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "reqps" } },
+      "fieldConfig": { "defaults": { "color": { "mode": "palette-classic" }, "unit": "short" } },
       "gridPos": { "h": 7, "w": 12, "x": 0, "y": 18 },
       "id": 21,
       "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
@@ -149,11 +149,11 @@
         {
           "datasource": { "type": "trino-datasource", "uid": "PD73EC80E50767796" },
           "queryType": "query",
-          "rawSQL": "SELECT date_trunc('minute', data_hora_processamento_silver) as time, ticket_ativo_b3 as metric, COUNT(*) as total_mensagens FROM delta.silver.cotacoes GROUP BY 1, 2 ORDER BY 1",
+          "rawSQL": "SELECT date_trunc('minute', data_hora_processamento_silver) as time, ticket_ativo_b3 as metric, COUNT(*) as mensagens_por_minuto FROM delta.silver.cotacoes GROUP BY 1, 2 ORDER BY 1",
           "refId": "A"
         }
       ],
-      "title": "Performance: Throughput (Mensagens/Seg)",
+      "title": "Performance: Throughput (Mensagens/Min)",
       "type": "timeseries"
     },
     {
