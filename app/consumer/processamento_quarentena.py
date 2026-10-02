@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import time
 from minio import Minio
+from consumer.compatibilidade import garantir_tabela_compativel
 from consumer.tratamento import transformar_bronze_para_quarentena
 from observability.logging_utils import configure_json_logging, log_event
 
@@ -55,6 +56,7 @@ def main():
         .load(BRONZE_PATH)
 
     df_quarentena = transformar_bronze_para_quarentena(df_bronze)
+    garantir_tabela_compativel(spark, QUARANTINE_PATH, df_quarentena, [], logger, log_event)
 
     query = df_quarentena.writeStream \
         .format("delta") \

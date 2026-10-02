@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any, Dict, List, Optional
 
 from observability.logging_utils import configure_json_logging, log_event
@@ -19,7 +20,9 @@ Instrumentator().instrument(app).expose(app)
 
 produtor = None
 KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "cotacoes")
-BRAPI_TIMEOUT_SECONDS = 10
+# (conexão, leitura): no máximo ~10s por rota da Brapi; com fallback v2 -> v1, até ~20s.
+BRAPI_TIMEOUT_SECONDS = (3, 7)
+# Pior caso do Kafka: max_block_ms (10s) no send + 15s aguardando o ack.
 KAFKA_PUBLISH_TIMEOUT_SECONDS = 15
 # Ações/FIIs/BDRs (PETR4, BOVA11, AAPL34) e índices (^BVSP); bloqueia "/", "?" etc. na URL da Brapi.
 TICKER_PATTERN = re.compile(r"\^?[A-Z0-9]{3,12}")
@@ -27,6 +30,9 @@ logger = configure_json_logging("api-ingestao")
 
 
 class CotacaoBrapi(BaseModel):
+    # requestedSymbol/changed só existem na rota v2; ficam None quando a resposta vem da v1 legada.
+    requestedSymbol: Optional[str] = None
+    changed: Optional[bool] = None
     symbol: Optional[str] = None
     shortName: Optional[str] = None
     longName: Optional[str] = None
@@ -62,11 +68,37 @@ def _modelo_para_dict(modelo: BaseModel) -> Dict[str, Any]:
     return modelo.dict()
 
 
+def normalizar_payload_brapi(dados: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(dados, dict):
+        return dados
+
+    resultados = dados.get("results")
+    if not isinstance(resultados, list):
+        return dados
+
+    resultados_normalizados = []
+    for item in resultados:
+        if not isinstance(item, dict):
+            resultados_normalizados.append(item)
+            continue
+
+        dados_item = item.get("data")
+        if isinstance(dados_item, dict):
+            item_normalizado = {**dados_item, **{k: v for k, v in item.items() if k != "data"}}
+            resultados_normalizados.append(item_normalizado)
+        else:
+            resultados_normalizados.append(item)
+
+    return {**dados, "results": resultados_normalizados}
+
+
 def validar_payload_brapi(dados: Dict[str, Any]) -> Dict[str, Any]:
+    dados_normalizados = normalizar_payload_brapi(dados)
+
     try:
-        payload = RespostaBrapi(**dados)
+        payload = RespostaBrapi(**dados_normalizados)
     except ValidationError as exc:
-        log_event(logger, logging.WARNING, "brapi_schema_validation_failed", erro=str(exc))
+        log_event(logger, logging.WARNING, "brapi_schema_validation_failed", erro=str(exc), payload=dados_normalizados)
         raise HTTPException(status_code=502, detail="Resposta da Brapi fora do schema esperado") from exc
 
     if not payload.results:
@@ -102,25 +134,76 @@ def normalizar_ticker(ticker: str) -> str:
 
 
 def consultar_brapi(ticker: str) -> Dict[str, Any]:
-    url = f"https://brapi.dev/api/quote/{ticker}"
-    params = {}
+    """Consulta a rota v2 (atual) e, em caso de falha, a rota v1 (legada).
+
+    Docs: https://brapi.dev/docs/acoes/cotacao — autenticação via header Bearer.
+    """
     token = os.getenv("BRAPI_TOKEN")
-    if token:
-        params["token"] = token
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    endpoints = [
+        ("v2", "https://brapi.dev/api/v2/stocks/quote", {"symbols": ticker}),
+        ("v1_legado", f"https://brapi.dev/api/quote/{ticker}", {}),
+    ]
 
-    try:
-        resposta = requests.get(url, params=params, timeout=BRAPI_TIMEOUT_SECONDS)
-        resposta.raise_for_status()
-        dados = resposta.json()
-        log_event(logger, logging.INFO, "brapi_request_succeeded", ticker=ticker, status_code=resposta.status_code)
-    except requests.RequestException as exc:
-        log_event(logger, logging.WARNING, "brapi_request_failed", ticker=ticker, erro=str(exc))
-        raise HTTPException(status_code=502, detail="Falha ao consultar Brapi") from exc
-    except ValueError as exc:
-        log_event(logger, logging.ERROR, "brapi_invalid_json", ticker=ticker, erro=str(exc))
-        raise HTTPException(status_code=502, detail="Resposta inválida da Brapi") from exc
+    ultima_erro = None
+    for versao, url, params in endpoints:
+        if ultima_erro is not None:
+            log_event(logger, logging.WARNING, "brapi_fallback_legacy_endpoint", ticker=ticker, endpoint_versao=versao)
 
-    return dados
+        inicio_requisicao = time.perf_counter()
+        try:
+            resposta = requests.get(url, params=params, headers=headers, timeout=BRAPI_TIMEOUT_SECONDS)
+            resposta.raise_for_status()
+            dados = resposta.json()
+            duracao_ms = round((time.perf_counter() - inicio_requisicao) * 1000, 2)
+            log_event(
+                logger,
+                logging.INFO,
+                "brapi_request_succeeded",
+                ticker=ticker,
+                status_code=resposta.status_code,
+                endpoint=url,
+                endpoint_versao=versao,
+                duracao_ms=duracao_ms,
+            )
+            return dados
+        except requests.RequestException as exc:
+            ultima_erro = exc
+            status_code = getattr(getattr(exc, "response", None), "status_code", None)
+            duracao_ms = round((time.perf_counter() - inicio_requisicao) * 1000, 2)
+            log_event(
+                logger,
+                logging.WARNING,
+                "brapi_request_failed",
+                ticker=ticker,
+                endpoint=url,
+                endpoint_versao=versao,
+                status_code=status_code,
+                erro=type(exc).__name__,
+                duracao_ms=duracao_ms,
+            )
+            # 404 = ticker sem cotação; a rota legada responderia o mesmo, só dobraria a latência.
+            if status_code == 404:
+                raise HTTPException(status_code=404, detail="Ticker sem cotação na Brapi") from exc
+            continue
+        except ValueError as exc:
+            ultima_erro = exc
+            duracao_ms = round((time.perf_counter() - inicio_requisicao) * 1000, 2)
+            log_event(
+                logger,
+                logging.ERROR,
+                "brapi_invalid_json",
+                ticker=ticker,
+                endpoint=url,
+                erro=str(exc),
+                duracao_ms=duracao_ms,
+            )
+            continue
+
+    if ultima_erro is not None:
+        raise HTTPException(status_code=502, detail="Falha ao consultar Brapi") from ultima_erro
+
+    raise HTTPException(status_code=502, detail="Falha ao consultar Brapi")
 
 
 def publicar_cotacao(ticker: str, dados: Dict[str, Any]) -> None:
@@ -132,15 +215,42 @@ def publicar_cotacao(ticker: str, dados: Dict[str, Any]) -> None:
     dados_validados = validar_payload_brapi(dados)
 
     try:
+        inicio_publicacao = time.perf_counter()
         kafka_producer = obter_produtor()
         future = kafka_producer.send(KAFKA_TOPIC, key=ticker, value=dados_validados)
         future.get(timeout=KAFKA_PUBLISH_TIMEOUT_SECONDS)
-        log_event(logger, logging.INFO, "kafka_publish_succeeded", ticker=ticker, topic=KAFKA_TOPIC)
+        duracao_ms = round((time.perf_counter() - inicio_publicacao) * 1000, 2)
+        log_event(
+            logger,
+            logging.INFO,
+            "kafka_publish_succeeded",
+            ticker=ticker,
+            topic=KAFKA_TOPIC,
+            duracao_ms=duracao_ms,
+        )
     except KafkaError as exc:
-        log_event(logger, logging.ERROR, "kafka_publish_failed", ticker=ticker, topic=KAFKA_TOPIC, erro=str(exc))
+        duracao_ms = round((time.perf_counter() - inicio_publicacao) * 1000, 2)
+        log_event(
+            logger,
+            logging.ERROR,
+            "kafka_publish_failed",
+            ticker=ticker,
+            topic=KAFKA_TOPIC,
+            erro=str(exc),
+            duracao_ms=duracao_ms,
+        )
         raise HTTPException(status_code=503, detail="Falha ao publicar no Kafka") from exc
     except Exception as exc:
-        log_event(logger, logging.ERROR, "kafka_publish_unexpected_error", ticker=ticker, topic=KAFKA_TOPIC, erro=str(exc))
+        duracao_ms = round((time.perf_counter() - inicio_publicacao) * 1000, 2)
+        log_event(
+            logger,
+            logging.ERROR,
+            "kafka_publish_unexpected_error",
+            ticker=ticker,
+            topic=KAFKA_TOPIC,
+            erro=str(exc),
+            duracao_ms=duracao_ms,
+        )
         raise HTTPException(status_code=503, detail="Falha inesperada ao publicar no Kafka") from exc
 
 

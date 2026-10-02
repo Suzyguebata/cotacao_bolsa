@@ -17,12 +17,14 @@ O processamento é contínuo, mas a latência de ponta a ponta depende também d
 
 Siga esta ordem exata para garantir que todas as camadas sejam criadas e fiquem visíveis no Trino e no Grafana. No Windows, use os equivalentes `.bat` (`start_pipeline.bat`, `register_trino_tables.bat`) ou o Git Bash.
 
-1.  **Reset total (sempre comece aqui para evidências limpas):**
+1.  **Reset total (opcional; apaga dados persistidos):**
     ```bash
     cd app
     ./reset_pipeline.sh
     ```
-    Remove containers, volumes do MinIO/Kafka e metadados do Trino.
+    Use somente quando quiser descartar o ambiente de teste. Remove containers, volumes do MinIO/Kafka e metadados do Trino; nao execute antes de coletar evidencias que precisam ser preservadas.
+
+    > ⚠️ **Obrigatório ao atualizar de uma versão anterior do layout** (ex.: Silver particionada por `data` em vez de `ano_mes_dia`, ou colunas renomeadas). Na inicialização, os jobs Silver e Quarentena comparam o esquema e o particionamento da tabela Delta existente com o layout atual. Se houver divergência, encerram com o log `delta_table_schema_incompatible`, listando as diferenças, em vez de falhar no meio do stream. Nesse caso, exporte as evidências necessárias e execute o reset.
 
 2.  **Subida do pipeline:**
     ```bash
@@ -30,10 +32,12 @@ Siga esta ordem exata para garantir que todas as camadas sejam criadas e fiquem 
     ```
     Sobe todos os serviços via Docker Compose, executa os testes Spark no container e abre o console do MinIO (porta 9001).
 
-3.  **Aguarde 5–7 minutos (tempo do Spark):**
-    Os jobs Spark gravam no Data Lake com trigger de **5 minutos**, e cada camada só inicia após detectar a anterior (Bronze → Silver → Gold).
+    > ⚠️ O script também sobe o `agendador`, que **inicia a coleta imediatamente** e consome quota da Brapi. Para uma coleta controlada (com horário de início/fim e captura de logs), siga o [Guia de evidências do TCC](app/GUIA_EVIDENCIAS_TCC.md) em vez deste passo.
+
+3.  **Aguarde até ~15 minutos após a primeira coleta (tempo do Spark):**
+    Bronze, Silver e Gold Operacional usam trigger de **5 minutos alinhado ao relógio** (:00, :05, :10…) e processam em cadeia. Um dado coletado às 10:01, por exemplo, chega à Bronze às 10:05, à Silver às 10:10 e à Gold Operacional às 10:15. No pior caso, a Gold fica pronta cerca de 15 minutos após a coleta.
     *   Acesse o [MinIO](http://localhost:9001) (admin/admin123) e entre no bucket `datalake`.
-    *   **Só prossiga quando** vir as pastas `bronze`, `silver` e `gold` contendo a subpasta `_delta_log`.
+    *   **Só prossiga quando** vir as 5 tabelas com a subpasta `_delta_log`: `bronze/cotacoes`, `silver/cotacoes`, `silver/cotacoes_rejeitadas`, `gold/media_precos_ingestao_5min` e `gold/media_precos_atualizacao_5min`.
 
 4.  **Registro no Trino:**
     ```bash
@@ -49,7 +53,9 @@ Siga esta ordem exata para garantir que todas as camadas sejam criadas e fiquem 
 
 ## 🔔 Modelo de Coleta
 
-**Atual — coleta acionada por trigger:** o serviço `agendador` (APScheduler) dispara, a cada `MARKET_DATA_POLL_INTERVAL_MINUTES`, uma chamada `GET /coletar/{ticker}` na API para cada ativo. A API consulta a Brapi, valida o payload e publica no Kafka.
+**Atual — coleta acionada por trigger:** o serviço `agendador` (APScheduler) dispara, a cada `MARKET_DATA_POLL_INTERVAL_MINUTES`, uma chamada à rota interna da aplicação `GET /coletar/{ticker}` para cada ativo. Essa rota FastAPI não mudou. Ao receber a chamada, a API consulta primeiro a rota externa v2 da Brapi (`GET https://brapi.dev/api/v2/stocks/quote?symbols={ticker}`), normaliza e valida o payload e publica no Kafka. Se a chamada v2 falhar, tenta a rota legada da Brapi (`/api/quote/{ticker}`) como fallback. A exceção é o `404` (ticker sem cotação): nesse caso não há fallback, porque a rota legada responderia o mesmo. O token é enviado no header `Authorization: Bearer`, conforme a [documentação da Brapi](https://brapi.dev/docs/acoes/cotacao), e não aparece na URL nem nos logs.
+
+Para evidência, os logs da API registram `endpoint_versao` (`v2` ou `v1_legado`) e `duracao_ms` em cada chamada, além do evento `brapi_fallback_legacy_endpoint` quando o fallback é acionado. O agendador coleta os tickers em paralelo (`MARKET_DATA_MAX_WORKERS`) e, ao fim de cada ciclo, registra `scheduler_cycle_finished` com `sucessos`, `falhas` e `duracao_ms`. Se o ciclo ultrapassar o intervalo configurado, registra `scheduler_cycle_overrun`.
 
 **Evolução planejada — Webhooks/Notificações da Brapi:** em vez de consultar periodicamente, a Brapi notificará a API quando houver atualização. A API já isola o caminho de publicação em `publicar_cotacao()` (validação de schema + envio ao Kafka), de modo que um futuro endpoint `POST /webhook/brapi` reutiliza exatamente o mesmo fluxo até o Kafka, sem alterar as camadas Spark.
 
@@ -60,7 +66,9 @@ Siga esta ordem exata para garantir que todas as camadas sejam criadas e fiquem 
 ```mermaid
 graph LR
     subgraph Ingestao
-        Agendador[Agendador / Trigger] -- "GET /coletar/{ticker}" --> API[FastAPI]
+        Agendador[Agendador / Trigger] -- "GET /coletar/{ticker} — rota interna" --> API[FastAPI]
+        API -- "GET /api/v2/stocks/quote?symbols={ticker} — preferida" --> Brapi[Brapi]
+        API -. "GET /api/quote/{ticker} — fallback legado" .-> Brapi
         API -- "publicar_cotacao()" --> Kafka[Kafka Topic: cotacoes]
     end
 
@@ -93,7 +101,7 @@ Após iniciar o pipeline, você pode acompanhar o status operacional através de
 | Serviço | URL de Acesso | Objetivo |
 | :--- | :--- | :--- |
 | **Grafana** | [http://localhost:3001](http://localhost:3001) | **Dashboard Principal: Saúde e Qualidade (DQS)** |
-| **Prometheus** | [http://localhost:9090](http://localhost:9090) | Consultar métricas brutas da API e Spark. |
+| **Prometheus** | [http://localhost:9090](http://localhost:9090) | Consultar métricas HTTP da API (FastAPI). |
 | **MinIO Console** | [http://localhost:9001](http://localhost:9001) | Verificar arquivos `.parquet` e logs Delta. |
 | **Spark Master** | [http://localhost:8080](http://localhost:8080) | Acompanhar aplicações Spark "Running". |
 | **FastAPI Docs** | [http://localhost:8000/docs](http://localhost:8000/docs) | Testar a ingestão manualmente. |
@@ -104,31 +112,25 @@ Após iniciar o pipeline, você pode acompanhar o status operacional através de
 
 ## 📈 Estratégia de Qualidade (Data Quality Score)
 
-O pipeline monitora quatro dimensões de qualidade em tempo real:
-1. **Validade**: Tickers e preços consistentes (Score 100 se não houver rejeições).
-2. **Completude**: Presença de metadados financeiros como `marketCap`.
-3. **Freshness (Frescor)**: Latência de ponta a ponta abaixo de 120s (SLA Near Real-Time).
-4. **Integridade**: Sucesso de parsing do JSON bruto na camada Bronze.
+O dashboard do Grafana monitora continuamente três dimensões de qualidade na Silver:
+1. **Validade**: percentual de registros com ticker preenchido e preço maior que zero.
+2. **Completude**: percentual de registros com valor de mercado (`valor_mercado_total`, `marketCap` na Brapi) preenchido.
+3. **Freshness operacional (Frescor)**: percentual de registros processados entre Kafka e Silver em até 660s. O SLA reflete o desenho do pipeline: 2 triggers de 5 minutos (Bronze e Silver) mais 60s de margem de processamento. O atraso herdado da fonte Brapi é medido separadamente, pois não é controlado pelo pipeline.
 
-Essas métricas são consolidadas no **Data Quality Score (DQS)** global visível no Grafana.
+O **Data Quality Score (DQS)** global é a média dessas três dimensões. Duas métricas complementares ficam no relatório SQL: a integridade do parsing na Bronze (`status_parse_bronze`) e os rejeitados por motivo na quarentena.
 
 ---
 
 ## ⚙️ Configuração
 
-Se houver token da Brapi disponível, configure antes de iniciar o Docker Compose:
-```bash
-export BRAPI_TOKEN=seu_token
-export MARKET_DATA_POLL_INTERVAL_MINUTES=5
-```
-
-Sem `BRAPI_TOKEN`, o pipeline usa o acesso gratuito da Brapi. Para desenvolvimento isso é suficiente, mas as evidências finais devem registrar a limitação de atualização da fonte.
-
-Também é possível criar um arquivo `.env` a partir do modelo:
+Crie o arquivo `.env` em `app/` a partir do modelo. O Docker Compose o lê automaticamente:
 
 ```bash
+cd app
 cp .env.example .env
 ```
+
+Preencha `BRAPI_TOKEN` com o token do seu plano. Ele é enviado à Brapi no header `Authorization: Bearer`. O `.env` está no `.gitignore`: **nunca o commite nem exiba o token em capturas de tela ou logs de evidência**. Sem token, as chamadas seguem sem autenticação, e o que fica disponível depende das regras e do plano da Brapi. As evidências finais devem registrar o plano usado e a limitação de atualização da fonte.
 
 Principais configurações:
 
@@ -136,8 +138,9 @@ Principais configurações:
 | :--- | :--- | :--- |
 | `BRAPI_TOKEN` | Token da Brapi Free/Pro. | vazio |
 | `MARKET_DATA_POLL_INTERVAL_MINUTES` | Intervalo do agendador. | `5` |
-| `MARKET_DATA_TICKERS` | Lista de ativos coletados, separada por vírgula. | `PETR4,VALE3,ITUB4,BBAS3,MGLU3` |
-| `MARKET_DATA_API_TIMEOUT_SECONDS` | Timeout do agendador ao chamar a API (deve superar 10s Brapi + 15s Kafka). | `30` |
+| `MARKET_DATA_TICKERS` | Lista de ativos coletados, separada por vírgula. | `PETR4,VALE3,ITUB4,BBAS3,MGLU3,BBDC4,ABEV3,WEGE3,RENT3,SUZB3,B3SA3,VIVT3,EQTL3,LREN3,AXIA3` |
+| `MARKET_DATA_API_TIMEOUT_SECONDS` | Timeout do agendador ao chamar a API. Deve superar o pior caso da API, ≈45s: Brapi v2 + fallback v1 (~10s cada) + Kafka (10s + 15s). | `60` |
+| `MARKET_DATA_MAX_WORKERS` | Coletas simultâneas por ciclo do agendador. | `4` |
 | `KAFKA_TOPIC` | Tópico Kafka usado pela API e pelo Spark Bronze. | `cotacoes` |
 | `KAFKA_PRODUCER_RETRIES` | Tentativas de reenvio do producer Kafka. | `5` |
 | `KAFKA_PRODUCER_RETRY_BACKOFF_MS` | Intervalo entre retentativas do producer Kafka. | `500` |
@@ -166,7 +169,7 @@ cd app
 # Lógica Spark (no container, que já tem Java/Spark)
 docker compose run --rm --no-deps --user root spark-bronze /usr/bin/python3 -m pytest /app/tests/testes_logica_spark.py
 # API e agendador
-docker compose run --rm --no-deps api python -m pytest /app/tests/testes_validacao_api.py /app/tests/testes_agendador.py
+docker compose run --rm --no-deps api python -m pytest /app/tests/testes_validacao_api.py /app/tests/testes_agendador.py /app/tests/testes_compatibilidade.py
 ```
 
 A execução local de `pytest` fora do Docker depende de uma instalação Java válida e da variável `JAVA_HOME`. Para evitar diferenças de ambiente, prefira os containers, como fazem o `start_pipeline.sh` e o CI.
@@ -195,27 +198,13 @@ Para o PR automático funcionar, habilite em `Settings > Actions > General > Wor
 
 ## 🔍 Consultando Dados no Trino
 
-### 1. Acessar o CLI do Trino
-```bash
-docker exec -it app-trino-1 trino
-```
-
-### 2. Registrar as Tabelas (Obrigatório após cada Reset)
-Após as pastas `_delta_log` aparecerem no MinIO para Bronze, Silver e Gold, execute:
+Acesse o CLI do Trino (a partir de `app/`):
 
 ```bash
-./register_trino_tables.sh
+docker-compose exec trino trino
 ```
 
-No Windows, também é possível usar:
-
-```bat
-register_trino_tables.bat
-```
-
-O script cria os schemas, registra as tabelas Delta e faz novas tentativas automaticamente caso o Spark ainda não tenha criado os logs Delta.
-
-Referência dos comandos executados:
+As tabelas precisam estar registradas: veja o passo 4 do E2E (`register_trino_tables.sh` ou `.bat`, obrigatório após cada reset). Comandos executados pelo script, para referência:
 
 ```sql
 -- Criar os esquemas
@@ -264,7 +253,7 @@ Principais colunas:
 - `valor_atual`: preço tipado como `double`.
 - `moeda`: código da moeda (ex: "BRL").
 - `variacao_valor_dia_anterior`: variação nominal.
-- `marketCap`: valor de mercado informado pela fonte.
+- `valor_mercado_total`: valor de mercado informado pela fonte (`marketCap` na Brapi).
 - `data_hora_atualizacao_valor`: horário real da cotação na Brapi.
 - `ano_mes_dia`: data de particionamento da Silver (formato `yyyy-MM-dd`).
 - `data_hora_kafka`, `data_hora_ingestao` e `data_hora_processamento_silver`: timestamps usados para cálculo de latência e auditoria.
@@ -322,12 +311,14 @@ Uso principal: análise temporal dos preços pelo horário real da cotação.
 
 O diretório `app/queries/` contém os scripts necessários para extrair as evidências finais do seu TCC:
 
-1.  **`relatorio_tcc_metricas.sql`**:
-    *   Contém queries SQL prontas para serem executadas no Trino.
-    *   **Uso**: Copie e cole os comandos para validar volume de dados, latência entre camadas e integridade dos preços.
-2.  **`metrics_analysis.py`**:
-    *   Script Python para análise de dados e geração de visualizações.
-    *   **Uso**: Após coletar dados por algum tempo, execute este script para gerar insights sobre o desempenho do pipeline (incluindo percentis p50, p95 e p99).
+1.  **`relatorio_tcc_metricas.sql`**: relatório principal, com volume por camada, qualidade, latência por etapa (p50, p95 e p99), cobertura e gaps de coleta, DQS por ticker e agregados Gold. As consultas são parametrizadas pela janela da coleta (placeholders como `{{INICIO_UTC}}` e `{{FIM_UTC}}`; padrão 09:45–18:00 BRT) e, por isso, **não devem ser coladas diretamente no Trino**. Gere o relatório em Markdown com:
+    ```bash
+    cd app
+    bash ./exportar_relatorio_tcc.sh AAAA-MM-DD              # janela padrão 09:45–18:00 BRT
+    bash ./exportar_relatorio_tcc.sh AAAA-MM-DD 10:00 17:30  # janela personalizada (horário de Brasília)
+    ```
+    O resultado fica em `app/evidencias/queries/`. O script usa `queries/format_trino_markdown.py` para transformar as seções em títulos.
+2.  **`metrics_analysis.py`**: catálogo de queries para exploração manual (inclui janelas das últimas 24 horas). Ao ser executado, apenas **imprime** as queries para copiar no CLI do Trino.
 
 ---
 
@@ -349,9 +340,9 @@ Plano adotado:
 1. **Desenvolvimento com Brapi Free**: manter o custo zero enquanto o pipeline, os testes e a documentação são estabilizados.
 2. **Coleta final com Brapi Pro**: contratar por um mês próximo da apresentação para coletar evidências com atraso aproximado de 5 minutos.
 3. **Duas Golds em janelas de 5 minutos**: separar a Gold Operacional, baseada em `data_hora_ingestao`, da Gold Financeira, baseada em `data_hora_atualizacao_valor`. A primeira mede comportamento do pipeline por intervalo de ingestão; a segunda representa a análise temporal da cotação pelo horário real informado pela Brapi. As escritas das Golds usam modo `complete` para materializar os agregados atuais durante a demonstração.
-4. **Medição de latência fim a fim**: separar latência da fonte, latência de ingestão e latência de processamento entre Bronze, Silver e Gold (utilizando percentis p50, p95 e p99 para análise de cauda).
+4. **Medição de latência fim a fim**: separar a latência da fonte (horário da cotação → Kafka) da latência de processamento Kafka → Bronze → Silver, usando percentis p50, p95 e p99 para análise de cauda. As Golds são recalculadas por inteiro a cada trigger (modo `complete`), então seu `data_hora_processamento` indica o último recálculo, não uma latência.
 5. **Quarentena de dados rejeitados**: manter em `silver.cotacoes_rejeitadas` os registros que não atendem às regras de qualidade da Silver, com o motivo de rejeição traduzido.
-6. **Trabalho futuro com WebSocket/Cedro**: registrar a integração com Market Data via WebSocket como evolução para dados efetivamente em tempo real, sem colocar essa dependência no caminho crítico da entrega.
+6. **Trabalhos futuros**: como próxima evolução, integrar webhooks/notificações da Brapi, aproveitando o `publicar_cotacao()` já isolado (ver [Modelo de Coleta](#-modelo-de-coleta)). Como evolução para dados efetivamente em tempo real, integrar Market Data via WebSocket (ex.: Cedro). Nenhuma das duas fica no caminho crítico da entrega.
 
 Essa escolha reduz risco operacional na apresentação e mantém uma justificativa sólida de Engenharia de Dados: a arquitetura é streaming, enquanto a tempestividade dos dados é limitada pelo provedor contratado.
 
@@ -374,12 +365,12 @@ Essas limitações devem ser apresentadas como decisões de escopo para manter o
 
 ## Checklist de Evidências para Defesa
 
-Antes da apresentação, recomenda-se executar uma coleta controlada e registrar:
+Antes da apresentação, recomenda-se executar uma coleta controlada e registrar os itens abaixo. O passo a passo (comandos, captura de logs e ordem das queries) está no [Guia de evidências do TCC](app/GUIA_EVIDENCIAS_TCC.md).
 
 1. **Subida do ambiente**: containers ativos no Docker Compose, API saudável e Spark jobs em execução.
 2. **Criação das camadas Delta**: pastas Bronze, Silver e Gold no MinIO com `_delta_log`.
 3. **Registro no Trino**: schemas `delta.bronze`, `delta.silver` e `delta.gold` consultáveis.
-4. **Volume por camada**: contagem de registros em Bronze, Silver e Gold usando `metrics_analysis.py`.
+4. **Volume por camada**: contagem de registros em Bronze, Silver e Gold (seção 01 do relatório gerado por `exportar_relatorio_tcc.sh`).
 5. **Qualidade de dados**: quantidade de registros válidos, inválidos filtrados e duplicidades removidas.
 6. **Quarentena**: contagem de rejeitados por `rejection_reason` em `delta.silver.cotacoes_rejeitadas`.
 7. **Latência por etapa**: diferença entre `data_hora_atualizacao_valor`, `data_hora_kafka` e `data_hora_processamento_silver`.
@@ -387,6 +378,20 @@ Antes da apresentação, recomenda-se executar uma coleta controlada e registrar
 9. **Particionamento**: distribuição física da Silver por `ticket_ativo_b3` e `ano_mes_dia`.
 10. **Agregados Gold**: médias, mínimos, máximos e amostras por janela de 5 minutos nas Golds operacional e financeira.
 11. **Limitação da fonte**: evidência do plano Brapi usado e explicação do impacto na latência fim a fim.
+
+---
+
+## 📎 Evidências e Anexos do TCC
+
+| Material | Onde | Conteúdo |
+| :--- | :--- | :--- |
+| Roteiro de coleta | [`app/GUIA_EVIDENCIAS_TCC.md`](app/GUIA_EVIDENCIAS_TCC.md) | Preparação, início/fim da coleta, captura de logs, exportação e interpretação do relatório. |
+| Relatório de métricas | `app/exportar_relatorio_tcc.sh` → `app/evidencias/queries/` | Resultado das queries Trino em Markdown para a data da coleta. |
+| Logs da sessão | `app/evidencias/logs/` | Logs JSON da API, agendador, Kafka e Spark (pasta fora do git). |
+| Site de anexos | [`docs/`](docs/), publicado em https://suzyguebata.github.io/cotacao_bolsa/ | Página do projeto com arquitetura, capturas (`docs/assets/evidencias/`) e o vídeo de demonstração. |
+| Vídeo | YouTube (não listado), incorporado no site | Demonstração da execução do pipeline. Não versionar o arquivo de vídeo no git. |
+
+> Revise logs e capturas antes de publicar: **nunca inclua o `.env`, o token da Brapi ou outras credenciais**.
 
 ---
 

@@ -208,6 +208,9 @@ tempCodeRunnerFile.py
 # Local Trino file metastore generated while registering Delta tables
 app/trino/metastore/
 
+# Local runtime evidence and captured Docker logs
+app/evidencias/
+
 # Ruff stuff:
 .ruff_cache/
 
@@ -221,4 +224,3 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
-
