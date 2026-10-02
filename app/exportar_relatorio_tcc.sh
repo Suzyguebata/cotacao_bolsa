@@ -37,7 +37,20 @@ if ! docker-compose exec -T trino trino --output-format=MARKDOWN \
     exit 1
 fi
 
-if ! python "$SCRIPT_DIR/queries/format_trino_markdown.py" "$RAW_FILE" "$REPORT_TMP"; then
+# Testa se o interpretador executa de fato: no Windows, "python3" pode ser o atalho da Microsoft Store.
+PYTHON_BIN=""
+for candidato in python3 python; do
+    if command -v "$candidato" >/dev/null 2>&1 && "$candidato" -c "import sys" >/dev/null 2>&1; then
+        PYTHON_BIN="$candidato"
+        break
+    fi
+done
+if [ -z "$PYTHON_BIN" ]; then
+    echo "Python 3 nao encontrado (python3/python). Instale-o para formatar o relatorio."
+    exit 1
+fi
+
+if ! "$PYTHON_BIN" "$SCRIPT_DIR/queries/format_trino_markdown.py" "$RAW_FILE" "$REPORT_TMP"; then
     echo "Falha ao formatar o relatorio Markdown."
     echo "Nenhum relatorio valido foi gerado."
     echo "Diagnosticos do Trino: $DIAGNOSTICS_FILE"

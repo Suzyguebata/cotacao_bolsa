@@ -142,37 +142,42 @@ flowchart LR
                 <div class="gallery-heading">
                     <p class="eyebrow">REGISTRO VISUAL</p>
                     <h3>Resultados da execução</h3>
-                    <p>Espaços reservados para inserir as capturas reais após a coleta de evidências.</p>
+                    <p>Capturas reais da coleta de evidências. Enquanto um arquivo não existir em <code>assets/evidencias/</code>, o espaço reservado correspondente é exibido.</p>
                 </div>
+                <!-- Cada imagem só aparece quando o arquivo existe; caso contrário, fica o espaço reservado. -->
                 <div class="screenshot-grid">
                     <figure class="screenshot-card">
+                        <a href="assets/evidencias/01-grafana.png" target="_blank" rel="noopener"><img class="screenshot-img" src="assets/evidencias/01-grafana.png" alt="Dashboard Grafana com DQS, freshness e latência" loading="lazy" hidden onload="this.hidden=false; this.closest('figure').querySelector('.media-placeholder').hidden=true;"></a>
                         <div class="media-placeholder">
                             <span class="placeholder-icon" aria-hidden="true">01</span>
                             <span>Adicionar captura do Grafana</span>
-                            <small>ex.: assets/evidencias/grafana.png</small>
+                            <small>assets/evidencias/01-grafana.png</small>
                         </div>
                         <figcaption><strong>Monitoramento e qualidade</strong><span>DQS, freshness e latência observados.</span></figcaption>
                     </figure>
                     <figure class="screenshot-card">
+                        <a href="assets/evidencias/02-minio-spark.png" target="_blank" rel="noopener"><img class="screenshot-img" src="assets/evidencias/02-minio-spark.png" alt="Camadas Delta no MinIO e jobs Spark em execução" loading="lazy" hidden onload="this.hidden=false; this.closest('figure').querySelector('.media-placeholder').hidden=true;"></a>
                         <div class="media-placeholder">
                             <span class="placeholder-icon" aria-hidden="true">02</span>
                             <span>Adicionar captura do MinIO ou Spark</span>
-                            <small>ex.: assets/evidencias/minio-spark.png</small>
+                            <small>assets/evidencias/02-minio-spark.png</small>
                         </div>
                         <figcaption><strong>Processamento e armazenamento</strong><span>Camadas Delta e jobs Spark em execução.</span></figcaption>
                     </figure>
                     <figure class="screenshot-card">
+                        <a href="assets/evidencias/03-logs-trino.png" target="_blank" rel="noopener"><img class="screenshot-img" src="assets/evidencias/03-logs-trino.png" alt="Logs de coleta Brapi e publicação Kafka ou consulta Trino" loading="lazy" hidden onload="this.hidden=false; this.closest('figure').querySelector('.media-placeholder').hidden=true;"></a>
                         <div class="media-placeholder">
                             <span class="placeholder-icon" aria-hidden="true">03</span>
                             <span>Adicionar resultado de logs ou Trino</span>
-                            <small>ex.: assets/evidencias/logs-trino.png</small>
+                            <small>assets/evidencias/03-logs-trino.png</small>
                         </div>
-                        <figcaption><strong>Ingestão comprovada</strong><span>Rota Brapi, confirmação Kafka ou consulta SQL.</span></figcaption>
+                        <figcaption><strong>Ingestão comprovada</strong><span>Rota Brapi (v2/legada), confirmação Kafka ou consulta SQL.</span></figcaption>
                     </figure>
                 </div>
             </div>
 
-            <div class="video-panel">
+            <div class="video-embed" id="video-embed" hidden></div>
+            <div class="video-panel" id="video-panel">
                 <div class="video-symbol" aria-hidden="true">▶</div>
                 <div>
                     <p class="eyebrow">DEMONSTRAÇÃO EM VÍDEO</p>
@@ -197,7 +202,7 @@ flowchart LR
                 <article><span>03</span><h3>Continuidade de coleta</h3><p>Cobertura por ativo, intervalos entre mensagens, falhas e confirmação de publicação.</p></article>
                 <article><span>04</span><h3>Agregações analíticas</h3><p>Visões Gold por horário de ingestão e horário do evento de mercado.</p></article>
             </div>
-            <p class="method-note">O SLA de 120 segundos refere-se à latência interna Kafka–Silver. A fonte pode fornecer cotações defasadas; portanto, esse atraso é medido separadamente e não é atribuído ao processamento do pipeline.</p>
+            <p class="method-note">O SLA de 660 segundos refere-se à latência interna Kafka–Silver e deriva do desenho do pipeline: dois triggers de 5 minutos (Bronze e Silver) mais 60 segundos de margem de processamento. A fonte pode fornecer cotações defasadas; portanto, esse atraso é medido separadamente e não é atribuído ao processamento do pipeline.</p>
         </section>
 
         <section class="future-band" id="evolucao">
@@ -215,5 +220,23 @@ flowchart LR
         <p>Projeto acadêmico de TCC · MBA USP/ESALQ</p>
         <small>© 2026 Suzana Alves · Projeto independente, sem endosso institucional.</small>
     </footer>
+    <script>
+        // Vídeo de demonstração: publique no YouTube como "não listado" e cole aqui apenas o ID
+        // (ex.: em https://youtu.be/AbC123xyz o ID é "AbC123xyz"). Vazio = mantém o aviso "VÍDEO A ADICIONAR".
+        const YOUTUBE_VIDEO_ID = "";
+
+        if (YOUTUBE_VIDEO_ID) {
+            const container = document.getElementById("video-embed");
+            const iframe = document.createElement("iframe");
+            iframe.src = `https://www.youtube-nocookie.com/embed/${encodeURIComponent(YOUTUBE_VIDEO_ID)}`;
+            iframe.title = "Demonstração em vídeo da execução do pipeline";
+            iframe.allow = "accelerometer; encrypted-media; gyroscope; picture-in-picture";
+            iframe.allowFullscreen = true;
+            iframe.loading = "lazy";
+            container.appendChild(iframe);
+            container.hidden = false;
+            document.getElementById("video-panel").hidden = true;
+        }
+    </script>
 </body>
 </html>

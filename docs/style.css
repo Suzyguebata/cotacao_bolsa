@@ -556,6 +556,37 @@ a:focus-visible {
     letter-spacing: 0.04em;
 }
 
+/* `display` dos componentes sobrescreveria o atributo hidden. */
+.media-placeholder[hidden],
+.screenshot-img[hidden],
+.video-panel[hidden],
+.video-embed[hidden] {
+    display: none;
+}
+
+.screenshot-img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 10;
+    object-fit: cover;
+    object-position: top;
+    border-bottom: 1px solid var(--line);
+}
+
+.video-embed {
+    margin-top: 24px;
+    aspect-ratio: 16 / 9;
+    border: 1px solid var(--line);
+    background: #000;
+}
+
+.video-embed iframe {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+}
+
 .media-placeholder small {
     color: var(--muted);
     font-size: 0.67rem;
