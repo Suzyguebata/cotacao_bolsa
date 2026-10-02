@@ -89,13 +89,14 @@ QUERIES = {
         ORDER BY data_hora_processamento_silver DESC
         LIMIT 20;
     """,
-    "latencia_operacional_gold": """
+    "recalculo_gold_operacional": """
         SELECT
             ticket_ativo_b3,
             fim_periodo,
             periodo_base,
             data_hora_processamento,
-            date_diff('second', fim_periodo, data_hora_processamento) as latencia_calculo_gold_segundos
+            -- Modo complete: data_hora_processamento e o ultimo recalculo, nao a latencia de calculo.
+            date_diff('second', fim_periodo, data_hora_processamento) as segundos_desde_fim_janela_ate_ultimo_recalculo
         FROM delta.gold.media_precos_ingestao_5min
         ORDER BY fim_periodo DESC
         LIMIT 10;

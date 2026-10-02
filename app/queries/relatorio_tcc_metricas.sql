@@ -2,39 +2,43 @@
 -- RELATORIO DE METRICAS E ANALISE - ARQUITETURA MEDALLION (TCC)
 -- Queries alinhadas ao schema atual gerado por consumer/tratamento.py.
 -- Exportar com secoes e cabecalhos: bash ./exportar_relatorio_tcc.sh (a partir de app/)
--- Janela da evidencia para a data selecionada: 09:45-18:00 America/Sao_Paulo (12:45-21:00 UTC),
--- na data informada ao exportador (YYYY-MM-DD).
+-- Janela da evidencia parametrizada pelo exportador: data (YYYY-MM-DD) e horario de Brasilia
+-- (padrao 09:45-18:00 = 12:45-21:00 UTC). Placeholders: {{INICIO_UTC}}, {{FIM_UTC}},
+-- {{JANELA_BRT}} e {{CICLOS_ESPERADOS}}. Nao execute este arquivo diretamente no Trino.
 -- ==============================================================================
 
-SELECT '00 - Janela analisada (horario de Brasilia: 09:45-18:00)' AS secao;
+SELECT '00 - Janela analisada (horario de Brasilia: {{JANELA_BRT}})' AS secao;
 SELECT
-    with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '12' HOUR + INTERVAL '45' MINUTE, 'UTC') as inicio_janela_utc,
-    with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '21' HOUR, 'UTC') as fim_janela_utc,
+    TIMESTAMP '{{INICIO_UTC}} UTC' as inicio_janela_utc,
+    TIMESTAMP '{{FIM_UTC}} UTC' as fim_janela_utc,
     'America/Sao_Paulo' as fuso_horario_local,
     5 as intervalo_coleta_minutos,
-    99 as ciclos_esperados_por_ticker,
+    {{CICLOS_ESPERADOS}} as ciclos_esperados_por_ticker,
     15 as tickers_configurados;
 
 SELECT '01 - Visao geral do Data Lake' AS secao;
-SELECT 'Bronze' as camada, count(*) as total FROM delta.bronze.cotacoes
-WHERE data_hora_kafka >= with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '12' HOUR + INTERVAL '45' MINUTE, 'UTC')
-  AND data_hora_kafka < with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '21' HOUR, 'UTC')
-UNION ALL
-SELECT 'Silver' as camada, count(*) as total FROM delta.silver.cotacoes
-WHERE data_hora_kafka >= with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '12' HOUR + INTERVAL '45' MINUTE, 'UTC')
-  AND data_hora_kafka < with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '21' HOUR, 'UTC')
-UNION ALL
-SELECT 'Silver Rejeitados' as camada, count(*) as total FROM delta.silver.cotacoes_rejeitadas
-WHERE data_hora_kafka >= with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '12' HOUR + INTERVAL '45' MINUTE, 'UTC')
-  AND data_hora_kafka < with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '21' HOUR, 'UTC')
-UNION ALL
-SELECT 'Gold Operacional' as camada, count(*) as total FROM delta.gold.media_precos_ingestao_5min
-WHERE inicio_periodo >= with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '12' HOUR + INTERVAL '45' MINUTE, 'UTC')
-  AND inicio_periodo < with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '21' HOUR, 'UTC')
-UNION ALL
-SELECT 'Gold Atualizacao Brapi' as camada, count(*) as total FROM delta.gold.media_precos_atualizacao_5min
-WHERE inicio_periodo >= with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '12' HOUR + INTERVAL '45' MINUTE, 'UTC')
-  AND inicio_periodo < with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '21' HOUR, 'UTC');
+SELECT camada, total FROM (
+    SELECT 1 as ordem, 'Bronze' as camada, count(*) as total FROM delta.bronze.cotacoes
+    WHERE data_hora_kafka >= TIMESTAMP '{{INICIO_UTC}} UTC'
+      AND data_hora_kafka < TIMESTAMP '{{FIM_UTC}} UTC'
+    UNION ALL
+    SELECT 2, 'Silver', count(*) FROM delta.silver.cotacoes
+    WHERE data_hora_kafka >= TIMESTAMP '{{INICIO_UTC}} UTC'
+      AND data_hora_kafka < TIMESTAMP '{{FIM_UTC}} UTC'
+    UNION ALL
+    SELECT 3, 'Silver Rejeitados', count(*) FROM delta.silver.cotacoes_rejeitadas
+    WHERE data_hora_kafka >= TIMESTAMP '{{INICIO_UTC}} UTC'
+      AND data_hora_kafka < TIMESTAMP '{{FIM_UTC}} UTC'
+    UNION ALL
+    SELECT 4, 'Gold Operacional', count(*) FROM delta.gold.media_precos_ingestao_5min
+    WHERE inicio_periodo >= TIMESTAMP '{{INICIO_UTC}} UTC'
+      AND inicio_periodo < TIMESTAMP '{{FIM_UTC}} UTC'
+    UNION ALL
+    SELECT 5, 'Gold Atualizacao Brapi', count(*) FROM delta.gold.media_precos_atualizacao_5min
+    WHERE inicio_periodo >= TIMESTAMP '{{INICIO_UTC}} UTC'
+      AND inicio_periodo < TIMESTAMP '{{FIM_UTC}} UTC'
+)
+ORDER BY ordem;
 
 SELECT '02 - Throughput de processamento Silver' AS secao;
 SELECT
@@ -42,8 +46,8 @@ SELECT
     count(*) as total_registros,
     round(count(*) / 60.0, 2) as registros_por_segundo
 FROM delta.silver.cotacoes
-WHERE data_hora_kafka >= with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '12' HOUR + INTERVAL '45' MINUTE, 'UTC')
-  AND data_hora_kafka < with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '21' HOUR, 'UTC')
+WHERE data_hora_kafka >= TIMESTAMP '{{INICIO_UTC}} UTC'
+  AND data_hora_kafka < TIMESTAMP '{{FIM_UTC}} UTC'
 GROUP BY 1
 ORDER BY 1 DESC;
 
@@ -56,8 +60,8 @@ SELECT
     max(valor_atual) as preco_maximo,
     round(max(valor_atual) - min(valor_atual), 2) as volatilidade_janela
 FROM delta.silver.cotacoes
-WHERE data_hora_kafka >= with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '12' HOUR + INTERVAL '45' MINUTE, 'UTC')
-  AND data_hora_kafka < with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '21' HOUR, 'UTC')
+WHERE data_hora_kafka >= TIMESTAMP '{{INICIO_UTC}} UTC'
+  AND data_hora_kafka < TIMESTAMP '{{FIM_UTC}} UTC'
 GROUP BY ticket_ativo_b3
 ORDER BY num_amostras DESC;
 
@@ -69,8 +73,8 @@ SELECT
     count_if(try(from_iso8601_timestamp(regularMarketTime)) IS NOT NULL) as com_timestamp_evento_valido,
     count_if(data_hora_ingestao IS NOT NULL) as com_ingestao_valida
 FROM delta.bronze.cotacoes
-WHERE data_hora_kafka >= with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '12' HOUR + INTERVAL '45' MINUTE, 'UTC')
-  AND data_hora_kafka < with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '21' HOUR, 'UTC');
+WHERE data_hora_kafka >= TIMESTAMP '{{INICIO_UTC}} UTC'
+  AND data_hora_kafka < TIMESTAMP '{{FIM_UTC}} UTC';
 
 SELECT '04b - Qualidade dos dados Silver' AS secao;
 SELECT
@@ -80,16 +84,16 @@ SELECT
     count_if(data_hora_atualizacao_valor IS NULL) as atualizacoes_invalidas_remanescentes,
     count_if(data_hora_ingestao IS NULL) as ingestoes_invalidas_remanescentes
 FROM delta.silver.cotacoes
-WHERE data_hora_kafka >= with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '12' HOUR + INTERVAL '45' MINUTE, 'UTC')
-  AND data_hora_kafka < with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '21' HOUR, 'UTC');
+WHERE data_hora_kafka >= TIMESTAMP '{{INICIO_UTC}} UTC'
+  AND data_hora_kafka < TIMESTAMP '{{FIM_UTC}} UTC';
 
 SELECT '04c - Registros rejeitados' AS secao;
 SELECT
     rejection_reason,
     count(*) as total_rejeitados
 FROM delta.silver.cotacoes_rejeitadas
-WHERE data_hora_kafka >= with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '12' HOUR + INTERVAL '45' MINUTE, 'UTC')
-  AND data_hora_kafka < with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '21' HOUR, 'UTC')
+WHERE data_hora_kafka >= TIMESTAMP '{{INICIO_UTC}} UTC'
+  AND data_hora_kafka < TIMESTAMP '{{FIM_UTC}} UTC'
 GROUP BY rejection_reason
 ORDER BY total_rejeitados DESC;
 
@@ -103,8 +107,8 @@ FROM delta.bronze.cotacoes
 WHERE symbol IS NOT NULL
   AND regularMarketTime IS NOT NULL
   AND regularMarketPrice IS NOT NULL
-  AND data_hora_kafka >= with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '12' HOUR + INTERVAL '45' MINUTE, 'UTC')
-  AND data_hora_kafka < with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '21' HOUR, 'UTC')
+  AND data_hora_kafka >= TIMESTAMP '{{INICIO_UTC}} UTC'
+  AND data_hora_kafka < TIMESTAMP '{{FIM_UTC}} UTC'
 GROUP BY symbol, regularMarketTime, regularMarketPrice
 HAVING count(*) > 1
 ORDER BY ocorrencias_repetidas DESC;
@@ -116,8 +120,8 @@ SELECT
     date_diff('second', min(data_hora_ingestao), max(data_hora_ingestao)) as duracao_total_segundos,
     date_diff('minute', min(data_hora_ingestao), max(data_hora_ingestao)) as duracao_total_minutos
 FROM delta.silver.cotacoes
-WHERE data_hora_kafka >= with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '12' HOUR + INTERVAL '45' MINUTE, 'UTC')
-  AND data_hora_kafka < with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '21' HOUR, 'UTC');
+WHERE data_hora_kafka >= TIMESTAMP '{{INICIO_UTC}} UTC'
+  AND data_hora_kafka < TIMESTAMP '{{FIM_UTC}} UTC';
 
 SELECT '06 - Latencia por etapa e ticker' AS secao;
 -- O atraso da fonte (Brapi -> Kafka) nao e latencia interna do pipeline.
@@ -137,8 +141,8 @@ WHERE data_hora_atualizacao_valor IS NOT NULL
   AND data_hora_kafka IS NOT NULL
   AND data_hora_ingestao IS NOT NULL
   AND data_hora_processamento_silver IS NOT NULL
-  AND data_hora_kafka >= with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '12' HOUR + INTERVAL '45' MINUTE, 'UTC')
-  AND data_hora_kafka < with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '21' HOUR, 'UTC')
+  AND data_hora_kafka >= TIMESTAMP '{{INICIO_UTC}} UTC'
+  AND data_hora_kafka < TIMESTAMP '{{FIM_UTC}} UTC'
 GROUP BY ticket_ativo_b3
 ORDER BY media_pipeline_kafka_para_silver_segundos DESC;
 
@@ -159,8 +163,8 @@ WHERE data_hora_atualizacao_valor IS NOT NULL
   AND data_hora_kafka IS NOT NULL
   AND data_hora_ingestao IS NOT NULL
   AND data_hora_processamento_silver IS NOT NULL
-  AND data_hora_kafka >= with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '12' HOUR + INTERVAL '45' MINUTE, 'UTC')
-  AND data_hora_kafka < with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '21' HOUR, 'UTC')
+  AND data_hora_kafka >= TIMESTAMP '{{INICIO_UTC}} UTC'
+  AND data_hora_kafka < TIMESTAMP '{{FIM_UTC}} UTC'
 ORDER BY data_hora_ingestao DESC
 LIMIT 20;
 
@@ -170,8 +174,8 @@ SELECT
     ano_mes_dia,
     COUNT(*) AS registros_na_particao
 FROM delta.silver.cotacoes
-WHERE data_hora_kafka >= with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '12' HOUR + INTERVAL '45' MINUTE, 'UTC')
-  AND data_hora_kafka < with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '21' HOUR, 'UTC')
+WHERE data_hora_kafka >= TIMESTAMP '{{INICIO_UTC}} UTC'
+  AND data_hora_kafka < TIMESTAMP '{{FIM_UTC}} UTC'
 GROUP BY ticket_ativo_b3, ano_mes_dia
 ORDER BY ticket_ativo_b3, ano_mes_dia;
 
@@ -186,10 +190,13 @@ SELECT
     preco_maximo_periodo,
     quantidade_amostras,
     data_hora_processamento,
-    date_diff('second', fim_periodo, data_hora_processamento) as latencia_calculo_gold_segundos
+    -- As Golds gravam em modo complete: a cada trigger todas as janelas sao reescritas e
+    -- data_hora_processamento passa a ser o horario do ULTIMO recalculo. Esta coluna NAO e latencia
+    -- de calculo; a latencia do pipeline e medida ate a Silver (secoes 06 e 11).
+    date_diff('second', fim_periodo, data_hora_processamento) as segundos_desde_fim_janela_ate_ultimo_recalculo
 FROM delta.gold.media_precos_ingestao_5min
-WHERE inicio_periodo >= with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '12' HOUR + INTERVAL '45' MINUTE, 'UTC')
-  AND inicio_periodo < with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '21' HOUR, 'UTC')
+WHERE inicio_periodo >= TIMESTAMP '{{INICIO_UTC}} UTC'
+  AND inicio_periodo < TIMESTAMP '{{FIM_UTC}} UTC'
 ORDER BY inicio_periodo DESC;
 
 SELECT '10 - Gold financeira por tempo da cotacao' AS secao;
@@ -204,8 +211,8 @@ SELECT
     quantidade_amostras,
     data_hora_processamento
 FROM delta.gold.media_precos_atualizacao_5min
-WHERE inicio_periodo >= with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '12' HOUR + INTERVAL '45' MINUTE, 'UTC')
-  AND inicio_periodo < with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '21' HOUR, 'UTC')
+WHERE inicio_periodo >= TIMESTAMP '{{INICIO_UTC}} UTC'
+  AND inicio_periodo < TIMESTAMP '{{FIM_UTC}} UTC'
 ORDER BY inicio_periodo DESC;
 
 SELECT '11 - Percentis de latencia interna Kafka-Silver' AS secao;
@@ -218,8 +225,8 @@ SELECT
 FROM delta.silver.cotacoes
 WHERE data_hora_kafka IS NOT NULL
   AND data_hora_processamento_silver IS NOT NULL
-  AND data_hora_kafka >= with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '12' HOUR + INTERVAL '45' MINUTE, 'UTC')
-  AND data_hora_kafka < with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '21' HOUR, 'UTC')
+  AND data_hora_kafka >= TIMESTAMP '{{INICIO_UTC}} UTC'
+  AND data_hora_kafka < TIMESTAMP '{{FIM_UTC}} UTC'
 GROUP BY ticket_ativo_b3
 ORDER BY p95_pipeline_segundos DESC;
 
@@ -235,8 +242,8 @@ SELECT
 FROM delta.silver.cotacoes
 WHERE data_hora_atualizacao_valor IS NOT NULL
   AND data_hora_kafka IS NOT NULL
-  AND data_hora_kafka >= with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '12' HOUR + INTERVAL '45' MINUTE, 'UTC')
-  AND data_hora_kafka < with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '21' HOUR, 'UTC')
+  AND data_hora_kafka >= TIMESTAMP '{{INICIO_UTC}} UTC'
+  AND data_hora_kafka < TIMESTAMP '{{FIM_UTC}} UTC'
 GROUP BY ticket_ativo_b3
 ORDER BY amostras_fonte_com_atraso DESC;
 
@@ -256,8 +263,8 @@ WITH metrics AS (
         ) as dentro_sla_pipeline,
         count_if(variacao_valor_dia_anterior IS NOT NULL) as com_variacao
     FROM delta.silver.cotacoes
-    WHERE data_hora_kafka >= with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '12' HOUR + INTERVAL '45' MINUTE, 'UTC')
-      AND data_hora_kafka < with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '21' HOUR, 'UTC')
+    WHERE data_hora_kafka >= TIMESTAMP '{{INICIO_UTC}} UTC'
+      AND data_hora_kafka < TIMESTAMP '{{FIM_UTC}} UTC'
     GROUP BY ticket_ativo_b3
 )
 SELECT
@@ -279,11 +286,11 @@ FROM metrics
 ORDER BY global_quality_score DESC;
 
 SELECT '14 - Cobertura de coleta por ticker na sessao' AS secao;
--- Espera 15 tickers x 99 ciclos (09:45-18:00, intervalo de 5 min).
+-- Espera 15 tickers x {{CICLOS_ESPERADOS}} ciclos ({{JANELA_BRT}} BRT, intervalo de 5 min).
 WITH configuracao_base AS (
     SELECT
-        with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '12' HOUR + INTERVAL '45' MINUTE, 'UTC') as inicio_periodo,
-        with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '21' HOUR, 'UTC') as fim_periodo,
+        TIMESTAMP '{{INICIO_UTC}} UTC' as inicio_periodo,
+        TIMESTAMP '{{FIM_UTC}} UTC' as fim_periodo,
         5 as intervalo_minutos
 ),
 configuracao AS (
@@ -291,7 +298,7 @@ configuracao AS (
         inicio_periodo,
         fim_periodo,
         intervalo_minutos,
-        8 * 60 / intervalo_minutos + 15 / intervalo_minutos as ciclos_esperados
+        {{CICLOS_ESPERADOS}} as ciclos_esperados
     FROM configuracao_base
 ),
 tickers_esperados (ticker) AS (
@@ -337,8 +344,8 @@ WITH intervalos AS (
         lag(data_hora_kafka) OVER (PARTITION BY symbol ORDER BY data_hora_kafka) as mensagem_anterior
     FROM delta.bronze.cotacoes
     WHERE symbol IS NOT NULL
-      AND data_hora_kafka >= with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '12' HOUR + INTERVAL '45' MINUTE, 'UTC')
-      AND data_hora_kafka < with_timezone(CAST(DATE '{{DATA_COLETA}}' AS TIMESTAMP) + INTERVAL '21' HOUR, 'UTC')
+      AND data_hora_kafka >= TIMESTAMP '{{INICIO_UTC}} UTC'
+      AND data_hora_kafka < TIMESTAMP '{{FIM_UTC}} UTC'
 )
 SELECT
     ticker,

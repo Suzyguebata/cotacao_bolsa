@@ -47,7 +47,7 @@ curl -i http://localhost:8000/health
 
 Confirme que `.env` esta configurado com os 15 tickers e intervalo de cinco minutos. Na secao 2, inicie primeiro a captura de logs; em seguida, as 09:45, inicie o agendador em outro terminal.
 
-**Confira a quota Brapi antes de iniciar o agendador.** Com 15 tickers a cada cinco minutos entre 09:45 e 18:00, o plano representa ate 99 ciclos por ticker: aproximadamente **1.485 chamadas externas Brapi** se cada chamada v2 for bem-sucedida. Quando a v2 falha, o fallback legado pode acrescentar outra chamada para aquele ticker; a excecao e o HTTP `404` (ticker sem cotacao), que nao aciona fallback. Voce informou uma media observada de 111 requisicoes/dia; 1.485 e cerca de 13,4 vezes esse volume. A media do painel nao confirma o limite nem o saldo disponivel do seu plano: confira a quota restante e nao inicie esta configuracao se ela nao comportar o teste. Se for necessario reduzir tickers ou aumentar o intervalo, ajuste tambem os valores esperados na query 14 do SQL antes da coleta.
+**Confira a quota Brapi antes de iniciar o agendador.** Com 15 tickers a cada cinco minutos entre 09:45 e 18:00, o plano representa ate 99 ciclos por ticker: aproximadamente **1.485 chamadas externas Brapi** se cada chamada v2 for bem-sucedida. Quando a v2 falha, o fallback legado pode acrescentar outra chamada para aquele ticker; a excecao e o HTTP `404` (ticker sem cotacao), que nao aciona fallback. Voce informou uma media observada de 111 requisicoes/dia; 1.485 e cerca de 13,4 vezes esse volume. A media do painel nao confirma o limite nem o saldo disponivel do seu plano: confira a quota restante e nao inicie esta configuracao se ela nao comportar o teste. Se for necessario reduzir tickers, ajuste tambem a lista `tickers_esperados` da query 14 do SQL antes da coleta (os ciclos esperados ja sao calculados pela janela informada ao exportador, considerando intervalo de cinco minutos).
 
 As 1.485 chamadas sao uma projecao, nao garantia: falhas, reinicios, duracao dos ciclos e respostas da fonte alteram o total. O agendador inicia um ciclo imediatamente e consulta os tickers em paralelo (`MARKET_DATA_MAX_WORKERS`, padrao 4), com timeout de 60s por chamada; no pior caso, um ciclo de 15 tickers leva cerca de 4 minutos, abaixo do intervalo de cinco. Se ainda assim um ciclo exceder o intervalo, o agendador registra o evento `scheduler_cycle_overrun` e o APScheduler nao inicia outra execucao enquanto a anterior estiver ativa.
 
@@ -150,10 +150,16 @@ Um evento `brapi_request_succeeded` mostra qual rota respondeu com sucesso. Se h
 
 ## 3. Gerar e interpretar o relatorio Trino
 
-As consultas do relatorio filtram Bronze e Silver pela janela de 09:45-18:00 da data informada (12:45-21:00 UTC) e Gold pelo inicio das janelas de agregacao. A consulta de cobertura espera 99 ciclos por ticker. Gere o relatorio depois de parar o agendador e aguardar os 15 minutos de processamento Spark. Se o exportador falhar com `Table '...' does not exist`, a tabela ainda nao foi criada ou registrada: confira as 5 pastas `_delta_log` no MinIO (secao 1) e execute `./register_trino_tables.sh` antes de tentar novamente. Informe a data da sessao explicitamente; para a coleta planejada nesta sexta-feira, 02/10/2026:
+As consultas do relatorio filtram Bronze e Silver pela janela informada (padrao 09:45-18:00 da data, ou seja, 12:45-21:00 UTC) e Gold pelo inicio das janelas de agregacao. A consulta de cobertura espera um ciclo a cada cinco minutos da janela (99 ciclos por ticker na janela padrao). Gere o relatorio depois de parar o agendador e aguardar os 15 minutos de processamento Spark. Se o exportador falhar com `Table '...' does not exist`, a tabela ainda nao foi criada ou registrada: confira as 5 pastas `_delta_log` no MinIO (secao 1) e execute `./register_trino_tables.sh` antes de tentar novamente. Informe a data da sessao explicitamente; para a coleta planejada nesta sexta-feira, 02/10/2026:
 
 ```bash
 bash ./exportar_relatorio_tcc.sh 2026-10-02
+```
+
+A janela padrao e 09:45-18:00 (horario de Brasilia). Para analisar outra janela (por exemplo, um ensaio curto ou uma coleta que comecou atrasada), informe inicio e fim em horario de Brasilia; os ciclos esperados por ticker sao recalculados a partir da duracao da janela:
+
+```bash
+bash ./exportar_relatorio_tcc.sh 2026-10-02 10:00 17:30
 ```
 
 O script salva o resultado em `evidencias/queries/relatorio-<data-hora>.md` e os diagnosticos do CLI em um arquivo `.stderr.log` separado. O parametro de data evita que o relatorio dependa do relogio ou do dia em que for exportado; informe sempre a data real da coleta no formato `YYYY-MM-DD`. O relatorio inclui uma secao com os limites UTC e os parametros usados. Abra o `.md` em um visualizador Markdown (por exemplo, a visualizacao de Markdown do VS Code ou GitHub) para ver as colunas como tabela; em um editor de texto simples, aparecera a sintaxe Markdown com barras verticais. O script requer Python 3 instalado no ambiente em que o comando e executado para formatar os titulos das secoes. Confira os diagnosticos: o aviso JLine `Unable to create a system terminal` pode aparecer porque o container e executado sem terminal interativo e, sozinho, nao indica erro SQL. Se o script indicar falha, nao use o relatorio como resultado valido.
@@ -170,7 +176,7 @@ No arquivo `queries/relatorio_tcc_metricas.sql`, cada consulta vem precedida de 
 |---|---|---|
 | 1 | **1. Visao geral do Data Lake** | Registros nas camadas Bronze, Silver, rejeitados e Gold. |
 | 2 | **4. Qualidade dos dados** | Parsing Bronze, regras Silver, rejeicoes e duplicidades. Esta secao tem quatro `SELECT`s. |
-| 3 | **14. Cobertura por ticker** | Mensagens Bronze parseadas por ativo contra 99 ciclos esperados no periodo. |
+| 3 | **14. Cobertura por ticker** | Mensagens Bronze parseadas por ativo contra os ciclos esperados na janela (99 na janela padrao). |
 | 4 | **15. Intervalos entre mensagens** | Gaps maiores que sete minutos por ticker na Bronze durante a sessao. |
 | 5 | **6. Latencia por etapa** | Atraso reportado pela fonte e tempos Kafka-Bronze, Bronze-Silver e Kafka-Silver. |
 | 6 | **11. Percentis de latencia do pipeline** | P50, P95 e P99 Kafka-Silver por ticker. |
@@ -183,12 +189,14 @@ Registre a data/hora de cada execucao e salve os resultados (por exemplo, em cap
 
 ### Interpretacao e premissas
 
-- A query 14 estima cobertura para **15 tickers**, com intervalo de **5 minutos**, das **09:45 as 18:00** (99 ciclos esperados por ticker; 1.485 mensagens no total se todos os ciclos tiverem sucesso). Ajuste lista, horario e intervalo no SQL se a configuracao real for diferente.
+- A query 14 estima cobertura para **15 tickers**, com intervalo de **5 minutos**, das **09:45 as 18:00** (99 ciclos esperados por ticker; 1.485 mensagens no total se todos os ciclos tiverem sucesso). O horario e ajustado pelos parametros do exportador; se a lista de tickers ou o intervalo forem diferentes, ajuste-os no SQL.
 - A cobertura conta registros parseados na Bronze, nao chamadas planejadas nem tentativas recusadas pela Brapi. Falhas/ausencias devem ser confrontadas com os logs.
 - A query 15 usa mensagens efetivamente presentes na Bronze durante a sessao e mostra gaps acima de 420 segundos; ela nao identifica sozinha se a causa foi agendador, fonte, API, Kafka ou processamento Bronze.
 - Atraso `data_hora_atualizacao_valor -> data_hora_kafka` inclui o frescor da cotacao fornecida pela Brapi. Latencia `data_hora_kafka -> data_hora_processamento_silver` mede o processamento interno Kafka-Silver. Nao interprete o atraso da fonte como tempo controlado pelo pipeline.
 - O SLA de 660 segundos e aplicado a latencia interna Kafka-Silver no DQS. Ele deriva do desenho do pipeline: dois triggers de cinco minutos (Bronze e Silver) mais 60 segundos de margem de processamento. Verifique os resultados medidos, pois a configuracao de trigger nao garante por si so cumprimento do SLA.
 - Os dados de mercado podem nao mudar a cada polling. A contagem de mensagens mede ingestao, nao quantidade de variacoes de preco distintas.
+- As Golds gravam em modo `complete`: a cada trigger todas as janelas sao recalculadas e `data_hora_processamento` passa a ser o horario do ultimo recalculo. Por isso a coluna `segundos_desde_fim_janela_ate_ultimo_recalculo` (query 9) cresce ao longo da sessao e **nao** deve ser apresentada como latencia de calculo da Gold; a latencia do pipeline e evidenciada ate a Silver (queries 6 e 11).
+- A Gold Financeira agrupa pelo horario da cotacao informado pela Brapi, que chega com atraso da fonte (no ensaio, cerca de 16 minutos). As primeiras janelas do dia podem comecar antes do inicio da janela analisada e, por isso, ficar fora da query 10.
 - As tabelas Gold sao agregacoes em janelas. Use Bronze/Silver e logs para evidenciar cada coleta; nao use contagens Gold como contagem de chamadas a API.
 - A janela SQL e baseada no horario do Kafka, que delimita a chegada dos eventos, e o calendario local esperado e BRT (UTC-3). A cobertura mede mensagens parseadas na Bronze, nao chamadas tentadas nem precos distintos.
 

@@ -4,12 +4,35 @@ set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SQL_FILE="$SCRIPT_DIR/queries/relatorio_tcc_metricas.sql"
 OUTPUT_DIR="$SCRIPT_DIR/evidencias/queries"
+# Uso: exportar_relatorio_tcc.sh AAAA-MM-DD [HH:MM_INICIO HH:MM_FIM]
+# Horários em Brasília (UTC-3, sem horário de verão); padrão 09:45-18:00 (pregão + after-market).
 COLLECTION_DATE="${1:-$(date +%Y-%m-%d)}"
+JANELA_INICIO="${2:-09:45}"
+JANELA_FIM="${3:-18:00}"
+INTERVALO_COLETA_MINUTOS=5
 
 if [[ ! "$COLLECTION_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
     echo "Informe a data da coleta no formato YYYY-MM-DD."
     exit 2
 fi
+if [[ ! "$JANELA_INICIO" =~ ^[0-2][0-9]:[0-5][0-9]$ || ! "$JANELA_FIM" =~ ^[0-2][0-9]:[0-5][0-9]$ ]]; then
+    echo "Informe a janela no formato HH:MM HH:MM (horario de Brasilia). Ex.: 09:45 18:00"
+    exit 2
+fi
+
+INICIO_UTC="$(date -u -d "$COLLECTION_DATE $JANELA_INICIO -0300" '+%Y-%m-%d %H:%M:%S' 2>/dev/null)"
+FIM_UTC="$(date -u -d "$COLLECTION_DATE $JANELA_FIM -0300" '+%Y-%m-%d %H:%M:%S' 2>/dev/null)"
+if [ -z "$INICIO_UTC" ] || [ -z "$FIM_UTC" ]; then
+    echo "Data ou horario invalido: $COLLECTION_DATE $JANELA_INICIO-$JANELA_FIM."
+    exit 2
+fi
+DURACAO_MINUTOS=$(( ($(date -u -d "$FIM_UTC" +%s) - $(date -u -d "$INICIO_UTC" +%s)) / 60 ))
+if [ "$DURACAO_MINUTOS" -le 0 ]; then
+    echo "O fim da janela ($JANELA_FIM) deve ser posterior ao inicio ($JANELA_INICIO)."
+    exit 2
+fi
+# Arredonda para cima: a janela inclui o ciclo do instante inicial (495 min -> 99; 27 min -> 6).
+CICLOS_ESPERADOS=$(( (DURACAO_MINUTOS + INTERVALO_COLETA_MINUTOS - 1) / INTERVALO_COLETA_MINUTOS ))
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 REPORT_FILE="$OUTPUT_DIR/relatorio-$TIMESTAMP.md"
@@ -24,8 +47,16 @@ SQL_TMP="$(mktemp "$OUTPUT_DIR/.relatorio-$TIMESTAMP.XXXXXX.sql")"
 RAW_FILE="$(mktemp "$OUTPUT_DIR/.relatorio-$TIMESTAMP.XXXXXX")"
 trap 'rm -f "$SQL_TMP" "$RAW_FILE" "$REPORT_TMP"' EXIT
 
-if ! sed "s/{{DATA_COLETA}}/$COLLECTION_DATE/g" "$SQL_FILE" > "$SQL_TMP"; then
+if ! sed -e "s/{{INICIO_UTC}}/$INICIO_UTC/g" \
+         -e "s/{{FIM_UTC}}/$FIM_UTC/g" \
+         -e "s/{{JANELA_BRT}}/$JANELA_INICIO-$JANELA_FIM/g" \
+         -e "s/{{CICLOS_ESPERADOS}}/$CICLOS_ESPERADOS/g" \
+         "$SQL_FILE" > "$SQL_TMP"; then
     echo "Falha ao preparar o SQL para a data $COLLECTION_DATE."
+    exit 1
+fi
+if grep -q '{{' "$SQL_TMP"; then
+    echo "Placeholder nao substituido no SQL: $(grep -o '{{[A-Z_]*}}' "$SQL_TMP" | sort -u | tr '\n' ' ')"
     exit 1
 fi
 
@@ -76,7 +107,7 @@ fi
 
 mv "$REPORT_TMP" "$REPORT_FILE"
 
-echo "Data da coleta analisada: $COLLECTION_DATE"
+echo "Data da coleta analisada: $COLLECTION_DATE, janela $JANELA_INICIO-$JANELA_FIM BRT ($INICIO_UTC a $FIM_UTC UTC), $CICLOS_ESPERADOS ciclos esperados por ticker"
 echo "Relatorio salvo em: $REPORT_FILE"
 echo "Diagnosticos do CLI salvos em: $DIAGNOSTICS_FILE"
 echo "Confira os diagnosticos; o aviso do JLine sobre terminal dumb pode ser ignorado em execucao sem TTY."

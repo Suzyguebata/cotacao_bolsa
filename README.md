@@ -311,10 +311,11 @@ Uso principal: análise temporal dos preços pelo horário real da cotação.
 
 O diretório `app/queries/` contém os scripts necessários para extrair as evidências finais do seu TCC:
 
-1.  **`relatorio_tcc_metricas.sql`**: relatório principal, com volume por camada, qualidade, latência por etapa (p50, p95 e p99), cobertura e gaps de coleta, DQS por ticker e agregados Gold. As consultas são parametrizadas pela data da coleta (`{{DATA_COLETA}}`, janela 09:45–18:00 BRT) e, por isso, **não devem ser coladas diretamente no Trino**. Gere o relatório em Markdown com:
+1.  **`relatorio_tcc_metricas.sql`**: relatório principal, com volume por camada, qualidade, latência por etapa (p50, p95 e p99), cobertura e gaps de coleta, DQS por ticker e agregados Gold. As consultas são parametrizadas pela janela da coleta (placeholders como `{{INICIO_UTC}}` e `{{FIM_UTC}}`; padrão 09:45–18:00 BRT) e, por isso, **não devem ser coladas diretamente no Trino**. Gere o relatório em Markdown com:
     ```bash
     cd app
-    bash ./exportar_relatorio_tcc.sh AAAA-MM-DD
+    bash ./exportar_relatorio_tcc.sh AAAA-MM-DD              # janela padrão 09:45–18:00 BRT
+    bash ./exportar_relatorio_tcc.sh AAAA-MM-DD 10:00 17:30  # janela personalizada (horário de Brasília)
     ```
     O resultado fica em `app/evidencias/queries/`. O script usa `queries/format_trino_markdown.py` para transformar as seções em títulos.
 2.  **`metrics_analysis.py`**: catálogo de queries para exploração manual (inclui janelas das últimas 24 horas). Ao ser executado, apenas **imprime** as queries para copiar no CLI do Trino.
@@ -339,7 +340,7 @@ Plano adotado:
 1. **Desenvolvimento com Brapi Free**: manter o custo zero enquanto o pipeline, os testes e a documentação são estabilizados.
 2. **Coleta final com Brapi Pro**: contratar por um mês próximo da apresentação para coletar evidências com atraso aproximado de 5 minutos.
 3. **Duas Golds em janelas de 5 minutos**: separar a Gold Operacional, baseada em `data_hora_ingestao`, da Gold Financeira, baseada em `data_hora_atualizacao_valor`. A primeira mede comportamento do pipeline por intervalo de ingestão; a segunda representa a análise temporal da cotação pelo horário real informado pela Brapi. As escritas das Golds usam modo `complete` para materializar os agregados atuais durante a demonstração.
-4. **Medição de latência fim a fim**: separar latência da fonte, latência de ingestão e latência de processamento entre Bronze, Silver e Gold (utilizando percentis p50, p95 e p99 para análise de cauda).
+4. **Medição de latência fim a fim**: separar a latência da fonte (horário da cotação → Kafka) da latência de processamento Kafka → Bronze → Silver, usando percentis p50, p95 e p99 para análise de cauda. As Golds são recalculadas por inteiro a cada trigger (modo `complete`), então seu `data_hora_processamento` indica o último recálculo, não uma latência.
 5. **Quarentena de dados rejeitados**: manter em `silver.cotacoes_rejeitadas` os registros que não atendem às regras de qualidade da Silver, com o motivo de rejeição traduzido.
 6. **Trabalhos futuros**: como próxima evolução, integrar webhooks/notificações da Brapi, aproveitando o `publicar_cotacao()` já isolado (ver [Modelo de Coleta](#-modelo-de-coleta)). Como evolução para dados efetivamente em tempo real, integrar Market Data via WebSocket (ex.: Cedro). Nenhuma das duas fica no caminho crítico da entrega.
 
