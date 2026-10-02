@@ -3,7 +3,7 @@ FROM apache/spark:3.5.0-python3
 USER root
 
 # Instalar dependências python necessárias
-RUN pip install delta-spark==3.0.0 pyspark==3.5.0 minio pytest
+RUN pip install delta-spark==3.0.0 pyspark==3.5.0 minio==7.2.10 pytest==8.3.5 pytest-cov==5.0.0
 
 # Criar diretórios necessários e dar permissão total ao usuário spark
 RUN mkdir -p /home/spark/.ivy2/cache && \

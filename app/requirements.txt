@@ -1,12 +1,12 @@
-fastapi
-fastapi
-uvicorn[standard]
-kafka-python
-requests
-apscheduler
-python-dotenv
-minio
-pydantic
-prometheus-fastapi-instrumentator
+fastapi==0.142.2
+uvicorn[standard]==0.54.0
+kafka-python==3.0.11
+requests==2.34.2
+apscheduler==3.11.3
+python-dotenv==1.2.4
+minio==7.2.20
+pydantic==2.13.5
+prometheus-fastapi-instrumentator==8.1.0
 
-pytest
+pytest==9.1.1
+pytest-cov==7.1.0

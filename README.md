@@ -13,28 +13,45 @@ O processamento é contínuo, mas a latência de ponta a ponta depende também d
 
 ---
 
-## ⚡ Guia Rápido: Teste End-to-End (E2E)
+## 🚀 Execução End-to-End (E2E)
 
-Para validar o pipeline completo e ver os dados no Grafana, siga este roteiro exato:
+Siga esta ordem exata para garantir que todas as camadas sejam criadas e fiquem visíveis no Trino e no Grafana. No Windows, use os equivalentes `.bat` (`start_pipeline.bat`, `register_trino_tables.bat`) ou o Git Bash.
 
-1.  **Limpeza Inicial (Obrigatório):**
-    No terminal, dentro da pasta `app`, execute `./reset_pipeline.sh`. Isso garante que você comece sem resquícios de testes anteriores.
+1.  **Reset total (sempre comece aqui para evidências limpas):**
+    ```bash
+    cd app
+    ./reset_pipeline.sh
+    ```
+    Remove containers, volumes do MinIO/Kafka e metadados do Trino.
 
-2.  **Subida do Pipeline:**
-    Execute `./start_pipeline.sh`. Aguarde o script finalizar o build e subir os containers.
+2.  **Subida do pipeline:**
+    ```bash
+    ./start_pipeline.sh
+    ```
+    Sobe todos os serviços via Docker Compose, executa os testes Spark no container e abre o console do MinIO (porta 9001).
 
-3.  **O Tempo do Spark (Aguarde 5-7 minutos):**
-    O Spark está configurado para escrever no Data Lake a cada **5 minutos**.
-    *   Acesse o [MinIO](http://localhost:9001) (admin/admin123).
-    *   Entre no bucket `datalake`.
-    *   **Só prossiga quando** vir as pastas `bronze`, `silver` e `gold` contendo uma subpasta chamada `_delta_log`.
+3.  **Aguarde 5–7 minutos (tempo do Spark):**
+    Os jobs Spark gravam no Data Lake com trigger de **5 minutos**, e cada camada só inicia após detectar a anterior (Bronze → Silver → Gold).
+    *   Acesse o [MinIO](http://localhost:9001) (admin/admin123) e entre no bucket `datalake`.
+    *   **Só prossiga quando** vir as pastas `bronze`, `silver` e `gold` contendo a subpasta `_delta_log`.
 
-4.  **Registro no Banco (Trino):**
-    Com os logs visíveis no MinIO, execute `./register_trino_tables.sh`. Esse passo "avisa" ao Trino que as tabelas existem.
+4.  **Registro no Trino:**
+    ```bash
+    ./register_trino_tables.sh
+    ```
+    Cria os schemas e registra as tabelas Delta, com novas tentativas automáticas caso os logs Delta ainda não existam.
 
-5.  **Visualização Final:**
-    Acesse o [Grafana](http://localhost:3001) (admin/admin) e abra o dashboard **`[TCC] Data Quality & Performance - v10`**.
-    *   *Nota:* O gráfico de **Ingestão** aparece na hora. Os gráficos de **Qualidade e Latência** aparecem assim que o passo 4 for concluído.
+5.  **Visualização:**
+    Acesse o [Grafana](http://localhost:3001) (admin/admin) e abra o dashboard **`[TCC] Data Quality & Performance`**.
+    *   O gráfico de **Ingestão** (Prometheus) aparece na hora. Os gráficos de **Qualidade e Latência** (Trino) aparecem após o passo 4.
+
+---
+
+## 🔔 Modelo de Coleta
+
+**Atual — coleta acionada por trigger:** o serviço `agendador` (APScheduler) dispara, a cada `MARKET_DATA_POLL_INTERVAL_MINUTES`, uma chamada `GET /coletar/{ticker}` na API para cada ativo. A API consulta a Brapi, valida o payload e publica no Kafka.
+
+**Evolução planejada — Webhooks/Notificações da Brapi:** em vez de consultar periodicamente, a Brapi notificará a API quando houver atualização. A API já isola o caminho de publicação em `publicar_cotacao()` (validação de schema + envio ao Kafka), de modo que um futuro endpoint `POST /webhook/brapi` reutiliza exatamente o mesmo fluxo até o Kafka, sem alterar as camadas Spark.
 
 ---
 
@@ -43,7 +60,8 @@ Para validar o pipeline completo e ver os dados no Grafana, siga este roteiro ex
 ```mermaid
 graph LR
     subgraph Ingestao
-        API[FastAPI] -- "Instrumentação Prometheus" --> Kafka[Kafka Topic: cotacoes]
+        Agendador[Agendador / Trigger] -- "GET /coletar/{ticker}" --> API[FastAPI]
+        API -- "publicar_cotacao()" --> Kafka[Kafka Topic: cotacoes]
     end
 
     subgraph "Processamento Spark (Medallion)"
@@ -80,7 +98,7 @@ Após iniciar o pipeline, você pode acompanhar o status operacional através de
 | **Spark Master** | [http://localhost:8080](http://localhost:8080) | Acompanhar aplicações Spark "Running". |
 | **FastAPI Docs** | [http://localhost:8000/docs](http://localhost:8000/docs) | Testar a ingestão manualmente. |
 
-> **Credenciais Grafana:** Usuário `admin` / Senha `admin`. O dashboard **"Pipeline Data Quality & Performance"** já vem pré-configurado.
+> **Credenciais Grafana:** Usuário `admin` / Senha `admin`. O dashboard **"[TCC] Data Quality & Performance"** já vem pré-configurado.
 
 ---
 
@@ -89,33 +107,14 @@ Após iniciar o pipeline, você pode acompanhar o status operacional através de
 O pipeline monitora quatro dimensões de qualidade em tempo real:
 1. **Validade**: Tickers e preços consistentes (Score 100 se não houver rejeições).
 2. **Completude**: Presença de metadados financeiros como `marketCap`.
-3. **Freshness (Frescor)**: Latência de ponta  aponta abaixo de 120s (SLA Near Real-Time).
+3. **Freshness (Frescor)**: Latência de ponta a ponta abaixo de 120s (SLA Near Real-Time).
 4. **Integridade**: Sucesso de parsing do JSON bruto na camada Bronze.
 
 Essas métricas são consolidadas no **Data Quality Score (DQS)** global visível no Grafana.
 
 ---
 
-## 🚀 Guia de Execução Passo a Passo
-
-Siga esta ordem exata para garantir que todas as camadas sejam criadas e fiquem visíveis no Trino.
-
-### 1. Reset Total (Sempre comece aqui para evidências limpas)
-Limpe todos os dados, volumes do MinIO/Kafka e metadados do Trino:
-```bash
-cd app
-./reset_pipeline.sh
-```
-
-### 2. Iniciar o Pipeline
-```bash
-./start_pipeline.sh
-```
-*Aguarde o script finalizar. Ele sobe todos os serviços via Docker Compose, executa os testes Spark no container e abre o console do MinIO (porta 9001) automaticamente.*
-
-Observação sobre testes Spark: a execução local de `pytest` fora do Docker depende de uma instalação Java válida e da variável `JAVA_HOME` configurada corretamente. Para evitar diferenças de ambiente, o caminho recomendado é executar os testes pelo próprio container Spark, como feito pelo `start_pipeline.sh`.
-
-O repositório também possui workflows de CI em `.github/workflows/`, que executam testes PySpark e checagens sintáticas dentro dos containers Docker.
+## ⚙️ Configuração
 
 Se houver token da Brapi disponível, configure antes de iniciar o Docker Compose:
 ```bash
@@ -136,8 +135,9 @@ Principais configurações:
 | Variável | Objetivo | Padrão |
 | :--- | :--- | :--- |
 | `BRAPI_TOKEN` | Token da Brapi Free/Pro. | vazio |
-| `MARKET_DATA_POLL_INTERVAL_MINUTES` | Intervalo do scheduler. | `5` |
+| `MARKET_DATA_POLL_INTERVAL_MINUTES` | Intervalo do agendador. | `5` |
 | `MARKET_DATA_TICKERS` | Lista de ativos coletados, separada por vírgula. | `PETR4,VALE3,ITUB4,BBAS3,MGLU3` |
+| `MARKET_DATA_API_TIMEOUT_SECONDS` | Timeout do agendador ao chamar a API (deve superar 10s Brapi + 15s Kafka). | `30` |
 | `KAFKA_TOPIC` | Tópico Kafka usado pela API e pelo Spark Bronze. | `cotacoes` |
 | `KAFKA_PRODUCER_RETRIES` | Tentativas de reenvio do producer Kafka. | `5` |
 | `KAFKA_PRODUCER_RETRY_BACKOFF_MS` | Intervalo entre retentativas do producer Kafka. | `500` |
@@ -151,14 +151,25 @@ API FastAPI e agendador são serviços conteinerizados no `docker-compose.yml`. 
 
 Ao iniciar, o agendador executa uma primeira coleta imediatamente e depois segue o intervalo configurado em `MARKET_DATA_POLL_INTERVAL_MINUTES`. Isso reduz o tempo de espera durante demonstrações e coletas de evidência.
 
-Antes da publicação no Kafka, a API valida a estrutura da resposta da Brapi com modelos Pydantic. Essa validação funciona como governança de schema na borda de ingestão: respostas sem `results` ou fora do contrato esperado são rejeitadas com erro `502`, enquanto os valores de negócio inválidos continuam sendo tratados pelas regras de qualidade da Silver e pela quarentena.
+Antes da publicação no Kafka, a API valida o ticker (formato B3, ex.: `PETR4`, `BOVA11`, `^BVSP`; inválidos retornam `400`) e a estrutura da resposta da Brapi com modelos Pydantic. Essa validação funciona como governança de schema na borda de ingestão: respostas sem `results` ou fora do contrato esperado são rejeitadas com erro `502`, enquanto os valores de negócio inválidos continuam sendo tratados pelas regras de qualidade da Silver e pela quarentena. Os detalhes técnicos dos erros ficam nos logs; a resposta HTTP traz apenas uma mensagem genérica.
 
 API, agendador e jobs Spark emitem logs estruturados em JSON por linha, com campos como `timestamp`, `service`, `event` e contexto operacional. Isso facilita coletar evidências de execução e prepara o projeto para integração futura com ferramentas como Prometheus/Grafana ou uma stack de logs.
 
-### 3. Aguardar a Inicialização das Camadas
-**Importante:** O Trino só consegue enxergar as tabelas após o Spark criar os logs do Delta Lake no MinIO.
-- **Aguarde de 2 a 3 minutos** após o script terminar.
-- Verifique no MinIO (`http://localhost:9001`) se as pastas `bronze`, `silver` e `gold` já possuem a subpasta `_delta_log`.
+---
+
+## 🧪 Testes
+
+Os testes ficam em `app/tests/` e seguem o padrão `testes_*.py` (configurado em `app/pytest.ini`).
+
+```bash
+cd app
+# Lógica Spark (no container, que já tem Java/Spark)
+docker compose run --rm --no-deps --user root spark-bronze /usr/bin/python3 -m pytest /app/tests/testes_logica_spark.py
+# API e agendador
+docker compose run --rm --no-deps api python -m pytest /app/tests/testes_validacao_api.py /app/tests/testes_agendador.py
+```
+
+A execução local de `pytest` fora do Docker depende de uma instalação Java válida e da variável `JAVA_HOME`. Para evitar diferenças de ambiente, prefira os containers, como fazem o `start_pipeline.sh` e o CI.
 
 ---
 
@@ -166,12 +177,15 @@ API, agendador e jobs Spark emitem logs estruturados em JSON por linha, com camp
 
 O repositório usa GitHub Actions para reforçar o fluxo de entrega:
 
-- **Branches de desenvolvimento** devem começar com `feature/`.
-- Ao criar ou atualizar uma branch `feature/*`, o workflow `.github/workflows/auto-pr-feature.yml` tenta abrir automaticamente um pull request para `develop`. Se a branch ainda não tiver commits à frente de `develop`, o PR é pulado até haver alterações.
-- Pull requests para `develop` só são considerados válidos quando vêm de branches `feature/*`.
-- Pull requests para `main` só são considerados válidos quando vêm da branch `develop`.
-- O workflow `.github/workflows/feature-ci.yml` executa testes PySpark e checagens sintáticas nos ciclos de feature.
-- O workflow `.github/workflows/release-ci.yml` executa validação reforçada antes de `develop` ir para `main`, incluindo `docker compose config`, build das imagens e testes.
+| Workflow | Gatilho | Função |
+| :--- | :--- | :--- |
+| `0-pr-policy.yml` | PR para `develop`/`main` | PRs para `develop` só de `feature/*`; PRs para `main` só de `develop`. |
+| `1-feature-ci.yml` | push em `feature/**` e PR para `develop` | Testes PySpark e da API com cobertura, checagem sintática e scan Sonar. |
+| `2-auto-pr-feature.yml` | criação/push de `feature/**` | Abre automaticamente PR `feature/*` → `develop` (se houver commits à frente). |
+| `auto-pr-develop.yml` | push em `develop` | Abre automaticamente PR `develop` → `main` (se houver commits à frente). |
+| `release-ci.yml` | PR `develop` → `main` | Validação reforçada: `docker compose config`, build de todas as imagens, testes com cobertura e Sonar. |
+
+Falhas de teste reprovam o job. O scan Sonar (SonarCloud) só roda quando o secret `SONAR_TOKEN` está configurado e é não bloqueante; os relatórios `app/coverage-*.xml` alimentam a cobertura.
 
 Importante: GitHub Actions consegue falhar checks, mas o bloqueio de merge deve ser configurado nas regras de proteção de branch do GitHub. Para garantir que nenhuma etapa seja pulada, configure os checks obrigatórios pelos nomes dos jobs: `Validate source and target branches`, `Spark and API checks` e `Full release validation`.
 
@@ -214,7 +228,7 @@ CALL delta.system.register_table(schema_name => 'bronze', table_name => 'cotacoe
 CALL delta.system.register_table(schema_name => 'silver', table_name => 'cotacoes', table_location => 's3a://datalake/silver/cotacoes');
 CALL delta.system.register_table(schema_name => 'silver', table_name => 'cotacoes_rejeitadas', table_location => 's3a://datalake/silver/cotacoes_rejeitadas');
 CALL delta.system.register_table(schema_name => 'gold', table_name => 'media_precos_ingestao_5min', table_location => 's3a://datalake/gold/media_precos_ingestao_5min');
-CALL delta.system.register_table(schema_name => 'gold', table_name => 'media_precos_evento_5min', table_location => 's3a://datalake/gold/media_precos_evento_5min');
+CALL delta.system.register_table(schema_name => 'gold', table_name => 'media_precos_atualizacao_5min', table_location => 's3a://datalake/gold/media_precos_atualizacao_5min');
 ```
 
 ---
@@ -229,7 +243,7 @@ A modelagem segue a arquitetura Medallion, separando rastreabilidade, qualidade 
 | Silver | `delta.silver.cotacoes` | Manter apenas cotações válidas, tipadas e deduplicadas. | `data_hora_atualizacao_valor` |
 | Silver Rejeitados | `delta.silver.cotacoes_rejeitadas` | Auditar registros rejeitados pelas regras de qualidade. | `data_hora_ingestao` |
 | Gold Operacional | `delta.gold.media_precos_ingestao_5min` | Medir comportamento operacional do pipeline por janela de ingestão. | `data_hora_ingestao` |
-| Gold Financeira | `delta.gold.media_precos_evento_5min` | Analisar preços por janela do horário real da cotação (evento). | `data_hora_atualizacao_valor` |
+| Gold Financeira | `delta.gold.media_precos_atualizacao_5min` | Analisar preços por janela do horário real da cotação (evento). | `data_hora_atualizacao_valor` |
 
 ### Bronze: `delta.bronze.cotacoes`
 
@@ -287,7 +301,7 @@ Principais colunas:
 - `periodo_base = data_hora_ingestao`;
 - `data_hora_processamento`.
 
-### Gold Financeira: `delta.gold.media_precos_evento_5min`
+### Gold Financeira: `delta.gold.media_precos_atualizacao_5min`
 
 Agrega a Silver por janelas de 5 minutos usando `data_hora_atualizacao_valor`.
 

@@ -21,7 +21,7 @@ echo "Testes aprovados!"
 echo
 
 # 3. Informar serviços conteinerizados
-echo "[3/4] API e Scheduler iniciados pelo Docker Compose."
+echo "[3/4] API e Agendador iniciados pelo Docker Compose."
 echo "FastAPI Docs: http://localhost:8000/docs"
 echo
 
