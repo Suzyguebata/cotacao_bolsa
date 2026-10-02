@@ -32,7 +32,7 @@ call :run_with_retry "Registrar delta.silver.cotacoes_rejeitadas" "CALL delta.sy
 if errorlevel 1 exit /b 1
 call :run_with_retry "Registrar delta.gold.media_precos_ingestao_5min" "CALL delta.system.register_table('gold', 'media_precos_ingestao_5min', 's3a://datalake/gold/media_precos_ingestao_5min')"
 if errorlevel 1 exit /b 1
-call :run_with_retry "Registrar delta.gold.media_precos_evento_5min" "CALL delta.system.register_table('gold', 'media_precos_evento_5min', 's3a://datalake/gold/media_precos_evento_5min')"
+call :run_with_retry "Registrar delta.gold.media_precos_atualizacao_5min" "CALL delta.system.register_table('gold', 'media_precos_atualizacao_5min', 's3a://datalake/gold/media_precos_atualizacao_5min')"
 if errorlevel 1 exit /b 1
 
 echo Tabelas disponiveis no Trino:

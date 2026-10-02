@@ -123,7 +123,7 @@ CREATE SCHEMA IF NOT EXISTS delta.gold;
 -- Registrar as tabelas
 CALL delta.system.register_table(schema_name => 'bronze', table_name => 'cotacoes', table_location => 's3a://datalake/bronze/cotacoes');
 CALL delta.system.register_table(schema_name => 'silver', table_name => 'cotacoes', table_location => 's3a://datalake/silver/cotacoes');
-CALL delta.system.register_table(schema_name => 'gold', table_name => 'media_precos_5min', table_location => 's3a://datalake/gold/media_precos_5min');
+CALL delta.system.register_table(schema_name => 'gold', table_name => 'media_precos', table_location => 's3a://datalake/gold/media_precos');
             </pre>
 
             <h3>Query de Volume por Camada</h3>
@@ -132,7 +132,7 @@ SELECT 'Bronze' as camada, count(*) as total FROM delta.bronze.cotacoes
 UNION ALL
 SELECT 'Silver' as camada, count(*) as total FROM delta.silver.cotacoes
 UNION ALL
-SELECT 'Gold' as camada, count(*) as total FROM delta.gold.media_precos_5min;
+SELECT 'Gold' as camada, count(*) as total FROM delta.gold.media_precos;
             </pre>
 
             <h3>Query de Throughput (Vazão)</h3>
@@ -169,7 +169,7 @@ SELECT
     avg_price,
     calculation_timestamp,
     date_diff('second', window_end, calculation_timestamp) as latencia_segundos
-FROM delta.gold.media_precos_5min
+FROM delta.gold.media_precos
 ORDER BY window_end DESC;
             </pre>
         </section>

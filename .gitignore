@@ -45,6 +45,7 @@ htmlcov/
 .cache
 nosetests.xml
 coverage.xml
+coverage-*.xml
 *.cover
 *.py.cover
 .hypothesis/
@@ -70,6 +71,7 @@ instance/
 
 # Sphinx documentation
 docs/_build/
+docs/rsp.md
 
 # PyBuilder
 .pybuilder/
@@ -219,3 +221,4 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+

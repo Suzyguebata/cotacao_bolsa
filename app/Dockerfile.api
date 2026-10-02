@@ -7,8 +7,8 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 COPY api/ /app/api/
 COPY observability/ /app/observability/
-COPY scheduler.py /app/scheduler.py
+COPY agendador.py /app/agendador.py
 
 ENV PYTHONPATH=/app
 
-CMD ["python", "-m", "uvicorn", "api.lambda_api:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "uvicorn", "api.api_ingestao:app", "--host", "0.0.0.0", "--port", "8000"]

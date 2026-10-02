@@ -13,7 +13,7 @@ echo.
 
 REM --- 2. Executar Testes Unitários no Docker
 echo [2/4] Executando Testes Unitários (Spark Transformation)...
-docker exec -u root app-spark-bronze-1 /usr/bin/python3 -m pytest /app/tests/test_spark_logic.py
+docker exec -u root app-spark-bronze-1 /usr/bin/python3 -m pytest /app/tests/testes_logica_spark.py
 if %ERRORLEVEL% NEQ 0 (
     echo [ERRO] Os testes unitários falharam! Verifique a lógica do Spark.
     pause
@@ -23,7 +23,7 @@ echo Testes aprovados!
 echo.
 
 REM --- 3. Informar serviços conteinerizados
-echo [3/4] API e Scheduler iniciados pelo Docker Compose.
+echo [3/4] API e Agendador iniciados pelo Docker Compose.
 echo FastAPI Docs: http://localhost:8000/docs
 echo.
 
