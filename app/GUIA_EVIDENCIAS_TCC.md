@@ -51,7 +51,13 @@ Confirme que `.env` esta configurado com os 15 tickers e intervalo de cinco minu
 
 As 1.485 chamadas sao uma projecao, nao garantia: falhas, reinicios, duracao dos ciclos e respostas da fonte alteram o total. O agendador inicia um ciclo imediatamente e consulta os tickers em paralelo (`MARKET_DATA_MAX_WORKERS`, padrao 4), com timeout de 60s por chamada; no pior caso, um ciclo de 15 tickers leva cerca de 4 minutos, abaixo do intervalo de cinco. Se ainda assim um ciclo exceder o intervalo, o agendador registra o evento `scheduler_cycle_overrun` e o APScheduler nao inicia outra execucao enquanto a anterior estiver ativa.
 
-Se as tabelas Delta ja existem no MinIO e estao registradas no Trino, nao faca nada. Numa primeira execucao, espere a primeira coleta ser processada e as pastas Delta serem criadas; depois registre-as:
+Se as tabelas Delta ja existem no MinIO e estao registradas no Trino, nao faca nada. Numa primeira execucao (ou apos um reset), as tabelas so sao criadas **depois** que a primeira coleta atravessa as camadas. Os triggers de 5 minutos sao alinhados ao relogio e encadeados (Bronze -> Silver -> Gold), entao, com o agendador iniciado as 09:45, aguarde ate cerca de **10:00-10:05**. Confirme que as 5 pastas abaixo possuem `_delta_log`:
+
+```bash
+docker-compose exec -T minio sh -c "ls -d /data/datalake/*/*/_delta_log"
+```
+
+O esperado e: `bronze/cotacoes`, `silver/cotacoes`, `silver/cotacoes_rejeitadas`, `gold/media_precos_ingestao_5min` e `gold/media_precos_atualizacao_5min`. So entao registre as tabelas:
 
 ```bash
 ./register_trino_tables.sh
@@ -87,7 +93,7 @@ Deixe a captura de logs rodando durante a coleta. As 18:00, no segundo terminal,
 docker-compose stop agendador
 ```
 
-Em seguida, pressione `Ctrl+C` no terminal de logs para encerrar apenas o acompanhamento, nao os containers. Aguarde pelo menos um ciclo de processamento Spark (cinco minutos) e confira os logs Bronze/Silver para confirmar que as mensagens finais foram processadas. Depois, salve tambem os logs ainda retidos pelo Docker, incluindo a inicializacao dos servicos:
+Em seguida, pressione `Ctrl+C` no terminal de logs para encerrar apenas o acompanhamento, nao os containers. Aguarde **15 minutos** (tres triggers encadeados de cinco minutos: Bronze, Silver e Gold) para que as mensagens finais atravessem todas as camadas. Confira nos logs do `spark-silver` uma linha `Committed offsets for batch` com horario posterior a ultima coleta. Depois, salve tambem os logs ainda retidos pelo Docker, incluindo a inicializacao dos servicos:
 
 ```bash
 docker-compose logs --since 2026-10-02T06:00:00 --timestamps --no-color > evidencias/logs/pipeline-sessao-completa.log
@@ -144,7 +150,7 @@ Um evento `brapi_request_succeeded` mostra qual rota respondeu com sucesso. Se h
 
 ## 3. Gerar e interpretar o relatorio Trino
 
-As consultas do relatorio filtram Bronze e Silver pela janela de 09:45-18:00 da data informada (12:45-21:00 UTC) e Gold pelo inicio das janelas de agregacao. A consulta de cobertura espera 99 ciclos por ticker. Gere o relatorio depois de parar o agendador e aguardar o processamento Spark. Informe a data da sessao explicitamente; para a coleta planejada nesta sexta-feira, 02/10/2026:
+As consultas do relatorio filtram Bronze e Silver pela janela de 09:45-18:00 da data informada (12:45-21:00 UTC) e Gold pelo inicio das janelas de agregacao. A consulta de cobertura espera 99 ciclos por ticker. Gere o relatorio depois de parar o agendador e aguardar os 15 minutos de processamento Spark. Se o exportador falhar com `Table '...' does not exist`, a tabela ainda nao foi criada ou registrada: confira as 5 pastas `_delta_log` no MinIO (secao 1) e execute `./register_trino_tables.sh` antes de tentar novamente. Informe a data da sessao explicitamente; para a coleta planejada nesta sexta-feira, 02/10/2026:
 
 ```bash
 bash ./exportar_relatorio_tcc.sh 2026-10-02

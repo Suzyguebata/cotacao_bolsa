@@ -34,10 +34,10 @@ Siga esta ordem exata para garantir que todas as camadas sejam criadas e fiquem 
 
     > ⚠️ O script também sobe o `agendador`, que **inicia a coleta imediatamente** e consome quota da Brapi. Para uma coleta controlada (com horário de início/fim e captura de logs), siga o [Guia de evidências do TCC](app/GUIA_EVIDENCIAS_TCC.md) em vez deste passo.
 
-3.  **Aguarde 5–7 minutos (tempo do Spark):**
-    Os jobs Spark gravam no Data Lake com trigger de **5 minutos**, e cada camada só inicia após detectar a anterior (Bronze → Silver → Gold).
+3.  **Aguarde até ~15 minutos após a primeira coleta (tempo do Spark):**
+    Bronze, Silver e Gold Operacional usam trigger de **5 minutos alinhado ao relógio** (:00, :05, :10…) e processam em cadeia. Um dado coletado às 10:01, por exemplo, chega à Bronze às 10:05, à Silver às 10:10 e à Gold Operacional às 10:15. No pior caso, a Gold fica pronta cerca de 15 minutos após a coleta.
     *   Acesse o [MinIO](http://localhost:9001) (admin/admin123) e entre no bucket `datalake`.
-    *   **Só prossiga quando** vir as pastas `bronze`, `silver` e `gold` contendo a subpasta `_delta_log`.
+    *   **Só prossiga quando** vir as 5 tabelas com a subpasta `_delta_log`: `bronze/cotacoes`, `silver/cotacoes`, `silver/cotacoes_rejeitadas`, `gold/media_precos_ingestao_5min` e `gold/media_precos_atualizacao_5min`.
 
 4.  **Registro no Trino:**
     ```bash

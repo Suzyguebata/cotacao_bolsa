@@ -29,6 +29,23 @@ if ! sed "s/{{DATA_COLETA}}/$COLLECTION_DATE/g" "$SQL_FILE" > "$SQL_TMP"; then
     exit 1
 fi
 
+# Pré-checagem: aponta quais tabelas faltam no Trino antes de rodar o relatório inteiro.
+TABELAS_ESPERADAS="bronze.cotacoes silver.cotacoes silver.cotacoes_rejeitadas gold.media_precos_ingestao_5min gold.media_precos_atualizacao_5min"
+TABELAS_REGISTRADAS="$(docker-compose exec -T trino trino --output-format=TSV --execute \
+    "SELECT table_schema || '.' || table_name FROM delta.information_schema.tables WHERE table_schema IN ('bronze', 'silver', 'gold')" 2>/dev/null | tr -d '\r')"
+FALTANDO=""
+for tabela in $TABELAS_ESPERADAS; do
+    if ! printf '%s\n' "$TABELAS_REGISTRADAS" | grep -qx "$tabela"; then
+        FALTANDO="$FALTANDO $tabela"
+    fi
+done
+if [ -n "$FALTANDO" ]; then
+    echo "Tabelas ainda nao registradas no Trino:$FALTANDO"
+    echo "Confira se as pastas _delta_log ja existem no MinIO (o Spark leva ate ~15 min apos a coleta)"
+    echo "e execute ./register_trino_tables.sh antes de exportar novamente."
+    exit 1
+fi
+
 if ! docker-compose exec -T trino trino --output-format=MARKDOWN \
     < "$SQL_TMP" > "$RAW_FILE" 2> "$DIAGNOSTICS_FILE"; then
     echo "Falha ao executar o relatorio Trino."
