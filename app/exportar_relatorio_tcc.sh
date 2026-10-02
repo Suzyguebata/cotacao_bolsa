@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SQL_FILE="$SCRIPT_DIR/queries/relatorio_tcc_metricas.sql"
+OUTPUT_DIR="$SCRIPT_DIR/evidencias/queries"
+COLLECTION_DATE="${1:-$(date +%Y-%m-%d)}"
+
+if [[ ! "$COLLECTION_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+    echo "Informe a data da coleta no formato YYYY-MM-DD."
+    exit 2
+fi
+
+TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+REPORT_FILE="$OUTPUT_DIR/relatorio-$TIMESTAMP.md"
+DIAGNOSTICS_FILE="$OUTPUT_DIR/relatorio-$TIMESTAMP.stderr.log"
+REPORT_TMP="$REPORT_FILE.tmp.$$"
+
+mkdir -p "$OUTPUT_DIR"
+
+cd "$SCRIPT_DIR"
+
+SQL_TMP="$(mktemp "$OUTPUT_DIR/.relatorio-$TIMESTAMP.XXXXXX.sql")"
+RAW_FILE="$(mktemp "$OUTPUT_DIR/.relatorio-$TIMESTAMP.XXXXXX")"
+trap 'rm -f "$SQL_TMP" "$RAW_FILE" "$REPORT_TMP"' EXIT
+
+if ! sed "s/{{DATA_COLETA}}/$COLLECTION_DATE/g" "$SQL_FILE" > "$SQL_TMP"; then
+    echo "Falha ao preparar o SQL para a data $COLLECTION_DATE."
+    exit 1
+fi
+
+if ! docker-compose exec -T trino trino --output-format=MARKDOWN \
+    < "$SQL_TMP" > "$RAW_FILE" 2> "$DIAGNOSTICS_FILE"; then
+    echo "Falha ao executar o relatorio Trino."
+    echo "Nenhum relatorio valido foi gerado."
+    echo "Diagnosticos: $DIAGNOSTICS_FILE"
+    exit 1
+fi
+
+if ! python "$SCRIPT_DIR/queries/format_trino_markdown.py" "$RAW_FILE" "$REPORT_TMP"; then
+    echo "Falha ao formatar o relatorio Markdown."
+    echo "Nenhum relatorio valido foi gerado."
+    echo "Diagnosticos do Trino: $DIAGNOSTICS_FILE"
+    exit 1
+fi
+
+mv "$REPORT_TMP" "$REPORT_FILE"
+
+echo "Data da coleta analisada: $COLLECTION_DATE"
+echo "Relatorio salvo em: $REPORT_FILE"
+echo "Diagnosticos do CLI salvos em: $DIAGNOSTICS_FILE"
+echo "Confira os diagnosticos; o aviso do JLine sobre terminal dumb pode ser ignorado em execucao sem TTY."

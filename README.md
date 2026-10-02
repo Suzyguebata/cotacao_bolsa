@@ -17,12 +17,14 @@ O processamento é contínuo, mas a latência de ponta a ponta depende também d
 
 Siga esta ordem exata para garantir que todas as camadas sejam criadas e fiquem visíveis no Trino e no Grafana. No Windows, use os equivalentes `.bat` (`start_pipeline.bat`, `register_trino_tables.bat`) ou o Git Bash.
 
-1.  **Reset total (sempre comece aqui para evidências limpas):**
+1.  **Reset total (opcional; apaga dados persistidos):**
     ```bash
     cd app
     ./reset_pipeline.sh
     ```
-    Remove containers, volumes do MinIO/Kafka e metadados do Trino.
+    Use somente quando quiser descartar o ambiente de teste. Remove containers, volumes do MinIO/Kafka e metadados do Trino; nao execute antes de coletar evidencias que precisam ser preservadas.
+
+    > ⚠️ **Obrigatório ao atualizar de uma versão anterior do layout** (ex.: Silver particionada por `data` em vez de `ano_mes_dia`, ou colunas renomeadas). Na inicialização, os jobs Silver e Quarentena comparam o esquema e o particionamento da tabela Delta existente com o layout atual. Se houver divergência, encerram com o log `delta_table_schema_incompatible`, listando as diferenças, em vez de falhar no meio do stream. Nesse caso, exporte as evidências necessárias e execute o reset.
 
 2.  **Subida do pipeline:**
     ```bash
@@ -49,7 +51,9 @@ Siga esta ordem exata para garantir que todas as camadas sejam criadas e fiquem 
 
 ## 🔔 Modelo de Coleta
 
-**Atual — coleta acionada por trigger:** o serviço `agendador` (APScheduler) dispara, a cada `MARKET_DATA_POLL_INTERVAL_MINUTES`, uma chamada `GET /coletar/{ticker}` na API para cada ativo. A API consulta a Brapi, valida o payload e publica no Kafka.
+**Atual — coleta acionada por trigger:** o serviço `agendador` (APScheduler) dispara, a cada `MARKET_DATA_POLL_INTERVAL_MINUTES`, uma chamada à rota interna da aplicação `GET /coletar/{ticker}` para cada ativo. Essa rota FastAPI não mudou. Ao receber a chamada, a API consulta primeiro a rota externa v2 da Brapi (`GET https://brapi.dev/api/v2/stocks/quote?symbols={ticker}`), normaliza e valida o payload e publica no Kafka. Se a chamada v2 falhar, tenta a rota legada da Brapi (`/api/quote/{ticker}`) como fallback. A exceção é o `404` (ticker sem cotação): nesse caso não há fallback, porque a rota legada responderia o mesmo. O token é enviado no header `Authorization: Bearer`, conforme a [documentação da Brapi](https://brapi.dev/docs/acoes/cotacao), e não aparece na URL nem nos logs.
+
+Para evidência, os logs da API registram `endpoint_versao` (`v2` ou `v1_legado`) e `duracao_ms` em cada chamada, além do evento `brapi_fallback_legacy_endpoint` quando o fallback é acionado. O agendador coleta os tickers em paralelo (`MARKET_DATA_MAX_WORKERS`) e, ao fim de cada ciclo, registra `scheduler_cycle_finished` com `sucessos`, `falhas` e `duracao_ms`. Se o ciclo ultrapassar o intervalo configurado, registra `scheduler_cycle_overrun`.
 
 **Evolução planejada — Webhooks/Notificações da Brapi:** em vez de consultar periodicamente, a Brapi notificará a API quando houver atualização. A API já isola o caminho de publicação em `publicar_cotacao()` (validação de schema + envio ao Kafka), de modo que um futuro endpoint `POST /webhook/brapi` reutiliza exatamente o mesmo fluxo até o Kafka, sem alterar as camadas Spark.
 
@@ -60,7 +64,9 @@ Siga esta ordem exata para garantir que todas as camadas sejam criadas e fiquem 
 ```mermaid
 graph LR
     subgraph Ingestao
-        Agendador[Agendador / Trigger] -- "GET /coletar/{ticker}" --> API[FastAPI]
+        Agendador[Agendador / Trigger] -- "GET /coletar/{ticker} — rota interna" --> API[FastAPI]
+        API -- "GET /api/v2/stocks/quote?symbols={ticker} — preferida" --> Brapi[Brapi]
+        API -. "GET /api/quote/{ticker} — fallback legado" .-> Brapi
         API -- "publicar_cotacao()" --> Kafka[Kafka Topic: cotacoes]
     end
 
@@ -107,7 +113,7 @@ Após iniciar o pipeline, você pode acompanhar o status operacional através de
 O pipeline monitora quatro dimensões de qualidade em tempo real:
 1. **Validade**: Tickers e preços consistentes (Score 100 se não houver rejeições).
 2. **Completude**: Presença de metadados financeiros como `marketCap`.
-3. **Freshness (Frescor)**: Latência de ponta a ponta abaixo de 120s (SLA Near Real-Time).
+3. **Freshness operacional (Frescor)**: processamento entre Kafka e Silver em até 660s. O SLA reflete o desenho do pipeline: 2 triggers de 5 minutos (Bronze e Silver) mais 60s de margem de processamento. O atraso herdado da fonte Brapi é medido separadamente, pois não é controlado pelo pipeline.
 4. **Integridade**: Sucesso de parsing do JSON bruto na camada Bronze.
 
 Essas métricas são consolidadas no **Data Quality Score (DQS)** global visível no Grafana.
@@ -136,8 +142,9 @@ Principais configurações:
 | :--- | :--- | :--- |
 | `BRAPI_TOKEN` | Token da Brapi Free/Pro. | vazio |
 | `MARKET_DATA_POLL_INTERVAL_MINUTES` | Intervalo do agendador. | `5` |
-| `MARKET_DATA_TICKERS` | Lista de ativos coletados, separada por vírgula. | `PETR4,VALE3,ITUB4,BBAS3,MGLU3` |
-| `MARKET_DATA_API_TIMEOUT_SECONDS` | Timeout do agendador ao chamar a API (deve superar 10s Brapi + 15s Kafka). | `30` |
+| `MARKET_DATA_TICKERS` | Lista de ativos coletados, separada por vírgula. | `PETR4,VALE3,ITUB4,BBAS3,MGLU3,BBDC4,ABEV3,WEGE3,RENT3,SUZB3,B3SA3,VIVT3,EQTL3,LREN3,AXIA3` |
+| `MARKET_DATA_API_TIMEOUT_SECONDS` | Timeout do agendador ao chamar a API. Deve superar o pior caso da API, ≈45s: Brapi v2 + fallback v1 (~10s cada) + Kafka (10s + 15s). | `60` |
+| `MARKET_DATA_MAX_WORKERS` | Coletas simultâneas por ciclo do agendador. | `4` |
 | `KAFKA_TOPIC` | Tópico Kafka usado pela API e pelo Spark Bronze. | `cotacoes` |
 | `KAFKA_PRODUCER_RETRIES` | Tentativas de reenvio do producer Kafka. | `5` |
 | `KAFKA_PRODUCER_RETRY_BACKOFF_MS` | Intervalo entre retentativas do producer Kafka. | `500` |
@@ -161,12 +168,14 @@ API, agendador e jobs Spark emitem logs estruturados em JSON por linha, com camp
 
 Os testes ficam em `app/tests/` e seguem o padrão `testes_*.py` (configurado em `app/pytest.ini`).
 
+Para o roteiro de coleta de evidências, comandos de logs e ordem das consultas Trino, consulte o [Guia de evidências do TCC](app/GUIA_EVIDENCIAS_TCC.md).
+
 ```bash
 cd app
 # Lógica Spark (no container, que já tem Java/Spark)
 docker compose run --rm --no-deps --user root spark-bronze /usr/bin/python3 -m pytest /app/tests/testes_logica_spark.py
 # API e agendador
-docker compose run --rm --no-deps api python -m pytest /app/tests/testes_validacao_api.py /app/tests/testes_agendador.py
+docker compose run --rm --no-deps api python -m pytest /app/tests/testes_validacao_api.py /app/tests/testes_agendador.py /app/tests/testes_compatibilidade.py
 ```
 
 A execução local de `pytest` fora do Docker depende de uma instalação Java válida e da variável `JAVA_HOME`. Para evitar diferenças de ambiente, prefira os containers, como fazem o `start_pipeline.sh` e o CI.
@@ -264,7 +273,7 @@ Principais colunas:
 - `valor_atual`: preço tipado como `double`.
 - `moeda`: código da moeda (ex: "BRL").
 - `variacao_valor_dia_anterior`: variação nominal.
-- `marketCap`: valor de mercado informado pela fonte.
+- `valor_mercado_total`: valor de mercado informado pela fonte (`marketCap` na Brapi).
 - `data_hora_atualizacao_valor`: horário real da cotação na Brapi.
 - `ano_mes_dia`: data de particionamento da Silver (formato `yyyy-MM-dd`).
 - `data_hora_kafka`, `data_hora_ingestao` e `data_hora_processamento_silver`: timestamps usados para cálculo de latência e auditoria.

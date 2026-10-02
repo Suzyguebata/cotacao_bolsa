@@ -17,7 +17,7 @@ DATA_LAKE_BUCKET = os.getenv("DATA_LAKE_BUCKET", "datalake")
 
 SILVER_PATH = os.getenv("SILVER_PATH", f"s3a://{DATA_LAKE_BUCKET}/silver/cotacoes")
 GOLD_PATH = os.getenv("GOLD_FINANCIAL_PATH", f"s3a://{DATA_LAKE_BUCKET}/gold/media_precos_atualizacao_5min")
-CHECKPOINT_GOLD = os.getenv("CHECKPOINT_GOLD_FINANCIAL", f"s3a://{DATA_LAKE_BUCKET}/checkpoints/gold_financeira_cotacoes")
+CHECKPOINT_GOLD = os.getenv("CHECKPOINT_GOLD_FINANCIAL", f"s3a://{DATA_LAKE_BUCKET}/checkpoints/gold_financeira_atualizacao")
 logger = configure_json_logging("spark-gold-financial")
 
 
