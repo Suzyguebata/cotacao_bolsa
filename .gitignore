@@ -211,6 +211,9 @@ app/trino/metastore/
 # Local runtime evidence and captured Docker logs
 app/evidencias/
 
+# Local Copilot/Claude instructions
+CLAUDE.md
+
 # Ruff stuff:
 .ruff_cache/
 

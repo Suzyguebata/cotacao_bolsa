@@ -11,8 +11,7 @@ from observability.logging_utils import configure_json_logging, log_event
 
 
 DEFAULT_TICKERS = (
-    "PETR4,VALE3,ITUB4,BBAS3,MGLU3,"
-    "BBDC4,ABEV3,WEGE3,RENT3,SUZB3,B3SA3,VIVT3,EQTL3,LREN3,AXIA3"
+    "PETR4,VALE3,ITUB4,BBAS3,MGLU3,ABEV3,WEGE3"
 )
 ATIVOS = [
     ticker.strip().upper()
@@ -24,7 +23,7 @@ POLL_INTERVAL_MINUTES = int(os.getenv("MARKET_DATA_POLL_INTERVAL_MINUTES", "5"))
 # Precisa superar o pior caso da API para não registrar falha em coletas publicadas:
 # Brapi v2 + fallback v1 (~10s cada) + Kafka (10s max_block + 15s ack) ≈ 45s.
 API_TIMEOUT_SECONDS = int(os.getenv("MARKET_DATA_API_TIMEOUT_SECONDS", "60"))
-MAX_WORKERS = int(os.getenv("MARKET_DATA_MAX_WORKERS", "4"))
+MAX_WORKERS = int(os.getenv("MARKET_DATA_MAX_WORKERS", "2"))
 logger = configure_json_logging("agendador")
 
 

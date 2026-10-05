@@ -92,6 +92,7 @@
             </div>
             <div class="diagram-shell">
                 <pre class="mermaid">
+%%{init: { 'themeVariables': { 'diagramPadding': 60 } }}%%
 flowchart LR
     S["Agendador<br/>polling configurável"] -->|"GET /coletar/{ticker}<br/>rota interna"| API["FastAPI<br/>validação + observabilidade"]
     API -->|"GET /api/v2/stocks/quote<br/>rota Brapi preferida"| BR["Brapi"]

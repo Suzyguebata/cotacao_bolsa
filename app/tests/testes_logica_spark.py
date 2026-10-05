@@ -187,7 +187,7 @@ def test_silver_filtra_registros_invalidos(spark):
         criar_linha_bronze_completa(symbol="ITUB4", regularMarketPrice=0.0),
         criar_linha_bronze_completa(symbol="BBAS3", regularMarketPrice=-1.0),
         criar_linha_bronze_completa(symbol="MGLU3", regularMarketTime="data-invalida"),
-        criar_linha_bronze_completa(symbol="BBDC4", data_hora_ingestao=None),
+        criar_linha_bronze_completa(symbol="WEGE3", data_hora_ingestao=None),
     ]
     df_bronze = spark.createDataFrame(dados_bronze, obter_schema_bronze_completo())
 
