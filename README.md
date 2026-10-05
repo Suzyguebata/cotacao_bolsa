@@ -64,30 +64,31 @@ Para evidência, os logs da API registram `endpoint_versao` (`v2` ou `v1_legado`
 ## 📊 Fluxo de Dados (Arquitetura Medallion)
 
 ```mermaid
+%%{init: {'theme': 'neutral'}}%%
 graph LR
-    subgraph Ingestao
-        Agendador[Agendador / Trigger] -- "GET /coletar/{ticker} — rota interna" --> API[FastAPI]
-        API -- "GET /api/v2/stocks/quote?symbols={ticker} — preferida" --> Brapi[Brapi]
+    subgraph Ingestao["Ingestão"]
+        Agendador["Agendador / Disparador"] -- "GET /coletar/{ticker} — rota interna" --> API["FastAPI"]
+        API -- "GET /api/v2/stocks/quote?symbols={ticker} — preferida" --> Brapi["Brapi"]
         API -. "GET /api/quote/{ticker} — fallback legado" .-> Brapi
-        API -- "publicar_cotacao()" --> Kafka[Kafka Topic: cotacoes]
+        API -- "publicar_cotacao()" --> Kafka["Tópico Kafka: cotacoes"]
     end
 
-    subgraph "Processamento Spark (Medallion)"
-        Kafka --> Bronze[Camada Bronze: RAW]
-        Bronze --> Silver[Camada Silver: Refined]
-        Bronze -- "Filtros de Qualidade" --> Quarentena[Silver: Quarentena/DLQ]
-        Silver --> GoldOp[Gold Operacional: Ingestion Time]
-        Silver --> GoldFin[Gold Financeira: Event Time]
+    subgraph Processamento["Processamento Spark (Arquitetura Medallion)"]
+        Kafka --> Bronze["Camada Bronze: Bruta (RAW)"]
+        Bronze --> Silver["Camada Silver: Refinada"]
+        Bronze -- "Filtros de Qualidade" --> Quarentena["Camada Silver: Quarentena / DLQ"]
+        Silver --> GoldOp["Camada Gold Operacional: Horário de Ingestão"]
+        Silver --> GoldFin["Camada Gold Financeira: Horário do Evento"]
     end
 
-    subgraph Armazenamento
-        Bronze & Silver & Quarentena & GoldOp & GoldFin --- MinIO[(MinIO / S3)]
+    subgraph Armazenamento["Armazenamento"]
+        Bronze & Silver & Quarentena & GoldOp & GoldFin --- MinIO[("MinIO / S3")]
     end
 
-    subgraph Analise_e_Monitoramento
-        MinIO --- Trino[Trino SQL]
-        Trino -- "DQS Metrics" --> Grafana[Grafana Dashboards]
-        API -- "Metrics" --> Prometheus[Prometheus]
+    subgraph Analise["Análise e Monitoramento"]
+        MinIO --- Trino["Trino SQL"]
+        Trino -- "Métricas de Qualidade de Dados (DQS)" --> Grafana["Painéis do Grafana"]
+        API -- "Métricas" --> Prometheus["Prometheus"]
         Prometheus --> Grafana
     end
 ```
@@ -138,9 +139,9 @@ Principais configurações:
 | :--- | :--- | :--- |
 | `BRAPI_TOKEN` | Token da Brapi Free/Pro. | vazio |
 | `MARKET_DATA_POLL_INTERVAL_MINUTES` | Intervalo do agendador. | `5` |
-| `MARKET_DATA_TICKERS` | Lista de ativos coletados, separada por vírgula. | `PETR4,VALE3,ITUB4,BBAS3,MGLU3,BBDC4,ABEV3,WEGE3,RENT3,SUZB3,B3SA3,VIVT3,EQTL3,LREN3,AXIA3` |
+| `MARKET_DATA_TICKERS` | Lista de ativos coletados, separada por vírgula. | `PETR4,VALE3,ITUB4,BBAS3,MGLU3,ABEV3,WEGE3` |
 | `MARKET_DATA_API_TIMEOUT_SECONDS` | Timeout do agendador ao chamar a API. Deve superar o pior caso da API, ≈45s: Brapi v2 + fallback v1 (~10s cada) + Kafka (10s + 15s). | `60` |
-| `MARKET_DATA_MAX_WORKERS` | Coletas simultâneas por ciclo do agendador. | `4` |
+| `MARKET_DATA_MAX_WORKERS` | Coletas simultâneas por ciclo do agendador. | `2` |
 | `KAFKA_TOPIC` | Tópico Kafka usado pela API e pelo Spark Bronze. | `cotacoes` |
 | `KAFKA_PRODUCER_RETRIES` | Tentativas de reenvio do producer Kafka. | `5` |
 | `KAFKA_PRODUCER_RETRY_BACKOFF_MS` | Intervalo entre retentativas do producer Kafka. | `500` |

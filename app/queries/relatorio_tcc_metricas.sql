@@ -304,8 +304,7 @@ configuracao AS (
 tickers_esperados (ticker) AS (
     VALUES
         ('PETR4'), ('VALE3'), ('ITUB4'), ('BBAS3'), ('MGLU3'),
-        ('BBDC4'), ('ABEV3'), ('WEGE3'), ('RENT3'), ('SUZB3'),
-        ('B3SA3'), ('VIVT3'), ('EQTL3'), ('LREN3'), ('AXIA3')
+        ('ABEV3'), ('WEGE3')
 ),
 recebidos AS (
     SELECT
